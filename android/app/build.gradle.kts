@@ -48,6 +48,7 @@ android {
         create("release") {
             if (keystorePropsFile.exists()) {
                 storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storeType = keystoreProps.getProperty("storeType") ?: "jks"
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
