@@ -1,0 +1,57 @@
+# Put this file at .github/workflows/build-signed-apk.yml in YOUR fork.
+# Builds the Android release APK only, signed with YOUR keystore (from repo secrets),
+# and uploads it as a downloadable workflow artifact. No version bump, no other
+# platforms, no release publishing — just a signed APK you can grab from the run page.
+name: Build signed APK (personal)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v5
+      - uses: gradle/actions/setup-gradle@v5
+
+      # Recreate keystore.properties + the .p12 file from secrets, entirely inside the
+      # runner. The plaintext password only ever exists as a masked GitHub secret and in
+      # this ephemeral file, which dies with the runner.
+      - name: Materialize signing key from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > my-noop.p12
+          cat > keystore.properties <<EOF
+          storeFile=my-noop.p12
+          storeType=PKCS12
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEYSTORE_PASSWORD
+          EOF
+
+      - name: Build signed release APK
+        run: ./gradlew assembleFullRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOOP-signed-release
+          path: android/app/build/outputs/apk/full/release/*.apk
+          retention-days: 14
