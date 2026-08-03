@@ -24,6 +24,10 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.HydrationStore
+import com.noop.analytics.StepsCalibrationPoint
+import com.noop.analytics.StepsCalibrationPointStore
+import com.noop.analytics.StepsCalibrationSource
+import com.noop.analytics.StepsEstimateEngine
 import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
@@ -122,6 +126,15 @@ object HealthConnectImporter {
      * import the same span.
      */
     private const val HYDRATION_WINDOW_DAYS = 30L
+
+    // ── Steps-calibration windows (StepsCalibrationPointStore) ──────────────────────────────────
+    /** How far back to pair StepsRecord windows with strap motion — matches IntelligenceEngine's own
+     *  `stepsCalDays` lookback for the whole-day comparison, so both sources cover the same span. */
+    private const val STEPS_CAL_LOOKBACK_DAYS = 60L
+    /** A StepsRecord longer than this is almost certainly a coarse daily/weekly provider aggregate
+     *  (the KcalIndex doc above notes providers do write these), not a real walking burst — skip it
+     *  rather than let one long window's motion swamp otherwise-clean short ones. */
+    private const val STEPS_CAL_MAX_WINDOW_SECONDS = 6L * 3600L
 
     /**
      * The set of Health Connect read-permission strings the UI must request before calling
@@ -234,6 +247,10 @@ object HealthConnectImporter {
         // zero and wipe 30 days of imported water.
         var hydrationReadOk = false
 
+        // Steps-calibration windows (see the readAll(StepsRecord) call below and StepsCalibrationPointStore):
+        // every raw record's own [startTime, endTime, count], kept separately from the day-bucketed sums
+        // above so the calibration pass can measure strap motion over each record's EXACT window.
+        val stepsWindows = ArrayList<StepsWindow>()
         val workouts = ArrayList<WorkoutRow>()
         // #1002: each workout's day key, computed at READ time while the record's own zone offset is
         // still in hand. WorkoutRow carries only epoch seconds, so re-deriving the key later would
@@ -259,10 +276,17 @@ object HealthConnectImporter {
             // walk, so summing across sources double-counts (~2x). Sum WITHIN a source (keyed by the record's
             // dataOrigin package), then take the MAX source per day at write-out, mirroring the de-overlap
             // already shipped on iOS/macOS and the Android XML importer.
+            //
+            // Each record's OWN [startTime, endTime] is also kept in [stepsWindows] (mirrors
+            // activeKcalRecords/totalKcalRecords below) — not just the day it falls in — so the
+            // steps-calibration pass after this import can pair strap motion with a step count over the
+            // SAME exact window, instead of the whole-day comparison's assumption that the phone was
+            // carried for the entire day the strap was worn (see StepsCalibrationPointStore).
             readAll(client, StepsRecord::class, filter, selfPackage) { r ->
                 val b = bucket(dayOf(r.startTime, r.startZoneOffset))
                 val src = r.metadata.dataOrigin.packageName
                 b.stepsBySource[src] = (b.stepsBySource[src] ?: 0L) + r.count
+                stepsWindows.add(StepsWindow(r.startTime.epochSecond, r.endTime.epochSecond, r.count, src))
             }
             // --- Total calories burned (basal + active) ---
             // #589: per-SOURCE sums, max-across-sources at write-out (same overlap reasoning as steps).
@@ -686,6 +710,67 @@ object HealthConnectImporter {
             return ImportSummary.failure(SOURCE, "Saving Health Connect data failed: ${e.message}")
         }
 
+        // Steps calibration (StepsCalibrationPointStore, Android-only): pair each raw StepsRecord's own
+        // window with the strap's OWN motion over that EXACT span — not the whole day — so later
+        // calibration isn't blind to whether the phone was actually carried for the rest of the day.
+        // Grouped by day into ONE gravity fetch per day (not one per window) for a corpus that can run to
+        // dozens of records/day. Best-effort: a failure here must never sink an otherwise-good import.
+        try {
+            val recentCutoff = end.epochSecond - STEPS_CAL_LOOKBACK_DAYS * 86_400L
+            // #589 applies here too: a phone AND a watch both writing Health Connect steps describe the
+            // SAME physical walk, so keeping every source's windows would pair one stretch of strap motion
+            // with two different step counts and enter both into the fit. The day totals solve this by
+            // taking the MAX source; the direct equivalent for windows is to keep exactly ONE source —
+            // the one contributing the most steps overall — and drop the rest.
+            val dominantSource = stepsWindows
+                .filter { it.startS >= recentCutoff }
+                .groupBy { it.source }
+                .mapValues { (_, ws) -> ws.sumOf { it.steps } }
+                .maxByOrNull { it.value }
+                ?.key
+            val usable = stepsWindows.filter {
+                it.source == dominantSource &&
+                    it.startS >= recentCutoff && it.endS > it.startS &&
+                    (it.endS - it.startS) <= STEPS_CAL_MAX_WINDOW_SECONDS && it.steps > 0 &&
+                    // Gravity is fetched one local day at a time below, so a window straddling midnight
+                    // would only ever see its first half and report motion far too low — inflating
+                    // steps/motion for that point. Rare enough to simply skip rather than special-case.
+                    dayOf(Instant.ofEpochSecond(it.startS), null) ==
+                    dayOf(Instant.ofEpochSecond(it.endS), null)
+            }
+            if (usable.isNotEmpty()) {
+                val newPoints = ArrayList<StepsCalibrationPoint>()
+                for ((day, windows) in usable.groupBy { dayOf(Instant.ofEpochSecond(it.startS), null) }) {
+                    val dayStart = runCatching { LocalDate.parse(day).atStartOfDay(zone).toEpochSecond() }
+                        .getOrNull() ?: continue
+                    // Already ordered by ts ASC by the DAO, and one local day at 1 Hz is at most 86,400
+                    // rows — comfortably inside WhoopRepository.DEFAULT_LIMIT (100,000), so this is never
+                    // silently truncated into a wrong motion figure.
+                    val dayGrav = repo.gravitySamples(WHOOP, dayStart, dayStart + 86_400L - 1)
+                    if (dayGrav.size < 2) continue
+                    for (w in windows) {
+                        val slice = dayGrav.filter { it.ts in w.startS..w.endS }
+                        if (slice.size < 2) continue
+                        val motion = StepsEstimateEngine.dayMotionIntensity(slice)
+                        if (motion >= StepsEstimateEngine.MIN_MOTION_FOR_FIT) {
+                            newPoints.add(
+                                StepsCalibrationPoint(
+                                    windowStart = w.startS,
+                                    windowEnd = w.endS,
+                                    motion = motion,
+                                    steps = w.steps.toDouble(),
+                                    source = StepsCalibrationSource.HEALTH_CONNECT,
+                                ),
+                            )
+                        }
+                    }
+                }
+                if (newPoints.isNotEmpty()) StepsCalibrationPointStore.addAll(context, newPoints)
+            }
+        } catch (_: Exception) {
+            // Best-effort: a calibration-point failure must not sink an otherwise-good import.
+        }
+
         val counts = buildMap {
             if (appleRows.isNotEmpty()) put("appleDaily", appleRows.size)
             if (dailyRows.isNotEmpty()) put("dailyMetric", dailyRows.size)
@@ -982,6 +1067,16 @@ object HealthConnectImporter {
         val startS: Long,
         val endS: Long,
         val kcal: Double,
+        val source: String,
+    )
+
+    /** One raw StepsRecord's own window, kept alongside the day-bucketed sum in [DayAcc.stepsBySource]
+     *  so the steps-calibration pass can pair strap motion with a step count over the SAME exact span
+     *  (see StepsCalibrationPointStore). Same shape as [KcalRecord] by design — same problem, same fix. */
+    internal data class StepsWindow(
+        val startS: Long,
+        val endS: Long,
+        val steps: Long,
         val source: String,
     )
 

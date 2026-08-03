@@ -173,4 +173,42 @@ class StepsEstimateEngineTest {
         val over = StepsEstimateEngine.CalibrationStatus.NeedsMoreDays(have = 9, need = 3)
         assertEquals("calibrating: 3/3 days", over.detail)
     }
+
+    // ── Bootstrap fallback (Android-only; walking-only points must never blend with whole-day ones) ──
+
+    @Test fun bootstrapNotUsedWhenEnoughWholeDayPoints() {
+        val days = listOf(p(10.0, 1000.0), p(10.0, 1000.0), p(10.0, 1000.0))
+        val boot = listOf(p(1.0, 100.0))
+        assertTrue(!StepsEstimateEngine.shouldUseBootstrap(days, boot))
+    }
+
+    @Test fun bootstrapUsedWhenTooFewWholeDayPoints() {
+        val days = listOf(p(10.0, 1000.0), p(10.0, 1000.0))  // 2 < MIN_CALIBRATION_DAYS
+        val boot = listOf(p(1.0, 100.0))
+        assertTrue(StepsEstimateEngine.shouldUseBootstrap(days, boot))
+    }
+
+    @Test fun bootstrapNotUsedWhenNoBootstrapPointsExist() {
+        assertTrue(!StepsEstimateEngine.shouldUseBootstrap(emptyList(), emptyList()))
+    }
+
+    /** The day-count gate must apply calibrate()'s OWN filter, or the two could disagree: a set that
+     *  looks sufficient here but that calibrate() rejects would fit nothing and silently skip the
+     *  bootstrap that should have covered it. */
+    @Test fun bootstrapGateIgnoresDayPointsCalibrateWouldReject() {
+        // Three day points, but each is below MIN_MOTION_FOR_FIT / has no steps — calibrate() drops all.
+        val unusableDays = listOf(p(0.5, 1000.0), p(0.4, 900.0), p(10.0, 0.0))
+        val boot = listOf(p(1.0, 100.0))
+        assertNull(StepsEstimateEngine.calibrate(unusableDays))
+        assertTrue(StepsEstimateEngine.shouldUseBootstrap(unusableDays, boot))
+    }
+
+    /** A bootstrap fit is learned from walking-only motion but applied to whole-day motion, so it runs
+     *  high; the cap keeps the UI from ever reporting better than "low confidence" for one. */
+    @Test fun bootstrapConfidenceCapSitsBelowLowMediumBoundary() {
+        assertEquals(
+            StepsEstimateEngine.ConfidenceTier.LOW,
+            StepsEstimateEngine.ConfidenceTier.from(StepsEstimateEngine.BOOTSTRAP_MAX_CONFIDENCE),
+        )
+    }
 }

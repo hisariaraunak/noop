@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.SyncProblem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -36,11 +37,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.noop.analytics.StepsCalibrationPoint
+import com.noop.analytics.StepsCalibrationPointStore
+import com.noop.analytics.StepsCalibrationSource
 import com.noop.analytics.StepsEstimateEngine
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -91,6 +99,9 @@ fun StepsCalibrationScreen(
     var sampleMotion by remember { mutableStateOf<Double?>(null) }
     // Flips true once the load pass has run, so the "no motion synced" note (#37) doesn't flash on first frame.
     var loaded by remember { mutableStateOf(false) }
+    // Nested full-screen Dialog for the "calibrate with a walk" flow (see StepsWalkCalibrationScreen
+    // below) — same idiom Settings uses to present this screen itself.
+    var showWalk by remember { mutableStateOf(false) }
 
     // The stepper's ceiling anchors to whatever's in force with generous headroom, so a nudge either way
     // stays reachable; a floor keeps it usable before any fit. Mirrors the macOS sliderMax.
@@ -173,9 +184,24 @@ fun StepsCalibrationScreen(
                     sampleMotion = sampleMotion,
                     onProfileChanged = onProfileChanged,
                 )
+                WalkCalibrationEntryCard(onStart = { showWalk = true })
             }
             Hairline()
             Footer(onClose)
+        }
+    }
+
+    if (showWalk) {
+        Dialog(
+            onDismissRequest = { showWalk = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            StepsWalkCalibrationScreen(
+                vm = vm,
+                profile = profile,
+                onProfileChanged = onProfileChanged,
+                onClose = { showWalk = false },
+            )
         }
     }
 }
@@ -456,6 +482,447 @@ private fun ManualAdjustCard(
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
+            }
+        }
+    }
+}
+
+/** Entry point into the "calibrate with a walk" flow below — a deliberate alternative to waiting on
+ *  MIN_CALIBRATION_DAYS of incidental phone-step overlap. */
+@Composable
+private fun WalkCalibrationEntryCard(onStart: () -> Unit) {
+    NoopCard(padding = 20.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Overline("No phone step history yet?")
+            Text(
+                "Walk a step count you can count exactly, and NOOP will read back the strap's own motion " +
+                    "for that window. Three or more walks give you a rough starter calibration without " +
+                    "any phone step data — used only until real phone-counted days are available, which " +
+                    "are always more accurate.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Button(
+                onClick = onStart,
+                colors = ButtonDefaults.buttonColors(containerColor = Palette.surfaceInset, contentColor = Palette.textPrimary),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.DirectionsWalk, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Calibrate with a walk")
+            }
+        }
+    }
+}
+
+// ================================================================================================
+// MARK: - Calibrate with a walk (Android-only; no Swift/macOS/iOS counterpart)
+// ================================================================================================
+//
+// An alternative bootstrap for StepsEstimateEngine's calibration when there's no phone step history
+// to fit against yet (or you just want a faster, more deliberate fit than waiting on incidental
+// day-to-day overlap): walk a KNOWN step count with the strap on, read back the strap's OWN motion
+// for exactly that window, and solve `k = steps / motion` directly.
+//
+// WHY THIS ISN'T INSTANT. A WHOOP 4.0's gravity stream is HISTORICAL-OFFLOAD ONLY (see
+// HistoricalStreams.kt / StreamPersistence.kt) — there is no live gravity feed while connected, so
+// after the walk we still have to trigger a sync ([AppViewModel.syncNow]) and wait for the strap to
+// hand over the type-47 records covering [start, end] before anything can be measured.
+//
+// ONE-SHOT, NOT AVERAGED (by design — see the calibration-scope decision this was built to): a single
+// walk sets [ProfileStore.stepsManualCoefficient] outright, the SAME field the "Adjust manually"
+// stepper above writes. Nothing here touches the phone-based auto-fit; stepping the manual value back
+// to 0 in that stepper returns to auto-fit exactly as before this screen existed.
+
+private const val WALK_DEVICE_ID = "my-whoop"
+private const val WALK_DEFAULT_STEPS = 100
+private const val WALK_STEP_INCREMENT = 10
+private const val WALK_MIN_STEPS = 10
+private const val WALK_MAX_STEPS = 2_000
+private const val WALK_SYNC_POLL_MS = 1_500L
+private const val WALK_SYNC_TIMEOUT_MS = 60_000L
+
+private fun walkNowSeconds(): Long = System.currentTimeMillis() / 1000L
+
+/** The walk flow's state machine. Each phase owns exactly the data the next step needs — no shared
+ *  mutable scratch state across phases. */
+private sealed interface WalkPhase {
+    data object Setup : WalkPhase
+    data class Walking(val startTs: Long) : WalkPhase
+    data class Confirm(val startTs: Long, val endTs: Long) : WalkPhase
+    data class Syncing(val startTs: Long, val endTs: Long, val steps: Int) : WalkPhase
+    data class Result(
+        val startTs: Long,
+        val endTs: Long,
+        val steps: Int,
+        val motion: Double,
+        val coefficient: Double,
+    ) : WalkPhase
+    data class Failed(val steps: Int, val startTs: Long, val endTs: Long, val message: String) : WalkPhase
+}
+
+/** Full-screen dialog content for the walk-calibration flow. Presented from [WalkCalibrationEntryCard]
+ *  above, same nested-Dialog idiom [StepsCalibrationScreen] itself uses from Settings. */
+@Composable
+fun StepsWalkCalibrationScreen(
+    vm: AppViewModel,
+    profile: ProfileStore,
+    onProfileChanged: () -> Unit,
+    onClose: () -> Unit,
+) {
+    // Resume an in-progress walk if the app was backgrounded/killed mid-walk: a saved start with no
+    // known end lands on Confirm with "now" as the end. Honest for a short walk; a long-forgotten one
+    // is easy to discard and redo from Setup.
+    var phase by remember {
+        mutableStateOf<WalkPhase>(
+            profile.stepsWalkStartTs.takeIf { it > 0 }?.let { start -> WalkPhase.Confirm(start, walkNowSeconds()) }
+                ?: WalkPhase.Setup,
+        )
+    }
+    var plannedSteps by remember {
+        mutableStateOf(profile.stepsWalkPlannedCount.takeIf { it > 0 } ?: WALK_DEFAULT_STEPS)
+    }
+    val context = LocalContext.current
+
+    fun clearSavedWalk() {
+        profile.stepsWalkStartTs = 0
+        profile.stepsWalkPlannedCount = 0
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            WalkHeader(onClose = { clearSavedWalk(); onClose() })
+            Hairline()
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+            ) {
+                when (val p = phase) {
+                    is WalkPhase.Setup -> WalkSetupCard(
+                        steps = plannedSteps,
+                        onStepsChange = { plannedSteps = it },
+                        onStart = {
+                            val start = walkNowSeconds()
+                            profile.stepsWalkStartTs = start
+                            profile.stepsWalkPlannedCount = plannedSteps
+                            phase = WalkPhase.Walking(start)
+                        },
+                    )
+                    is WalkPhase.Walking -> WalkInProgressCard(
+                        startTs = p.startTs,
+                        onDone = { phase = WalkPhase.Confirm(p.startTs, walkNowSeconds()) },
+                        onCancel = { clearSavedWalk(); phase = WalkPhase.Setup },
+                    )
+                    is WalkPhase.Confirm -> WalkConfirmCard(
+                        defaultSteps = plannedSteps,
+                        durationSeconds = (p.endTs - p.startTs).coerceAtLeast(0),
+                        onConfirm = { steps -> phase = WalkPhase.Syncing(p.startTs, p.endTs, steps) },
+                        onCancel = { clearSavedWalk(); phase = WalkPhase.Setup },
+                    )
+                    is WalkPhase.Syncing -> {
+                        WalkSyncingCard()
+                        LaunchedEffect(p) { phase = runWalkSync(vm, p.startTs, p.endTs, p.steps) }
+                    }
+                    is WalkPhase.Result -> WalkResultCard(
+                        steps = p.steps,
+                        motion = p.motion,
+                        coefficient = p.coefficient,
+                        onSave = {
+                            // Adds ONE data point to the shared calibration pool (StepsCalibrationPointStore)
+                            // — the SAME pool Health-Connect-windowed points feed — rather than overwriting
+                            // the manual override outright. IntelligenceEngine's weighted-median fit then
+                            // folds this walk in alongside every other point, so one walk can't dominate any
+                            // more than one bad day already can't. The "Adjust manually" stepper above still
+                            // exists as a separate, literal override for anyone who wants to bypass fitting.
+                            StepsCalibrationPointStore.addAll(
+                                context,
+                                listOf(
+                                    StepsCalibrationPoint(
+                                        windowStart = p.startTs,
+                                        windowEnd = p.endTs,
+                                        motion = p.motion,
+                                        steps = p.steps.toDouble(),
+                                        source = StepsCalibrationSource.WALK,
+                                    ),
+                                ),
+                            )
+                            clearSavedWalk()
+                            // The periodic loop's HR-fingerprint gate wouldn't otherwise notice this changed
+                            // (no new HR data arrived), so force the fit to reflect it right away.
+                            vm.rescoreStepsCalibration()
+                            onProfileChanged()
+                            onClose()
+                        },
+                        onDiscard = { clearSavedWalk(); phase = WalkPhase.Setup },
+                    )
+                    is WalkPhase.Failed -> WalkFailedCard(
+                        message = p.message,
+                        onRetry = { phase = WalkPhase.Syncing(p.startTs, p.endTs, p.steps) },
+                        onCancel = { clearSavedWalk(); phase = WalkPhase.Setup },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Trigger a manual sync and poll for gravity data covering [startTs, endTs] up to a timeout.
+ *  Suspends the caller (called from a [LaunchedEffect]); never throws. */
+private suspend fun runWalkSync(vm: AppViewModel, startTs: Long, endTs: Long, steps: Int): WalkPhase {
+    if (!vm.live.value.connected) {
+        return WalkPhase.Failed(
+            steps, startTs, endTs,
+            "Your WHOOP isn't connected right now. Reconnect it, then tap Retry.",
+        )
+    }
+    vm.syncNow()
+    val deadline = System.currentTimeMillis() + WALK_SYNC_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+        val grav = runCatching { vm.repo.gravitySamples(WALK_DEVICE_ID, startTs, endTs) }
+            .getOrDefault(emptyList())
+            .sortedBy { it.ts }
+        val motion = StepsEstimateEngine.dayMotionIntensity(grav)
+        if (grav.size >= 2 && motion >= StepsEstimateEngine.MIN_MOTION_FOR_FIT) {
+            return WalkPhase.Result(startTs, endTs, steps, motion, steps / motion)
+        }
+        delay(WALK_SYNC_POLL_MS)
+    }
+    return WalkPhase.Failed(
+        steps, startTs, endTs,
+        "We didn't see enough motion data for that time window yet. Make sure your WHOOP has synced " +
+            "(check the Devices screen), then tap Retry.",
+    )
+}
+
+@Composable
+private fun WalkHeader(onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Overline("Steps estimate", color = Palette.textTertiary)
+            Text("Calibrate with a walk", style = NoopType.display(26f), color = Palette.textPrimary)
+        }
+        IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.Close, contentDescription = "Close", tint = Palette.textTertiary, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+@Composable
+private fun WalkSetupCard(steps: Int, onStepsChange: (Int) -> Unit, onStart: () -> Unit) {
+    NoopCard(padding = 20.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Overline("Walk a known number of steps")
+            Text(
+                "Wear your WHOOP, then walk a step count you can count accurately (a treadmill display " +
+                    "or your phone's own pedometer works well). Try to keep other movement to a minimum " +
+                    "for the rest of this window, so the motion NOOP measures is mostly your walk.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("$steps", style = NoopType.number(24f), color = Palette.textPrimary)
+                Text(
+                    "steps planned",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                StepperField(
+                    value = "$steps",
+                    accessibility = "Planned step count, $steps",
+                    onMinus = { onStepsChange((steps - WALK_STEP_INCREMENT).coerceAtLeast(WALK_MIN_STEPS)) },
+                    onPlus = { onStepsChange((steps + WALK_STEP_INCREMENT).coerceAtMost(WALK_MAX_STEPS)) },
+                )
+            }
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+            ) { Text("Start walk") }
+        }
+    }
+}
+
+@Composable
+private fun WalkInProgressCard(startTs: Long, onDone: () -> Unit, onCancel: () -> Unit) {
+    var elapsed by remember { mutableStateOf((walkNowSeconds() - startTs).coerceAtLeast(0)) }
+    LaunchedEffect(startTs) {
+        while (true) {
+            elapsed = (walkNowSeconds() - startTs).coerceAtLeast(0)
+            delay(1_000)
+        }
+    }
+    NoopCard(padding = 20.dp, tint = Palette.accent) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Overline("Walking")
+            Text(
+                "Take your steps now. Tap \"I'm done\" the moment you finish — the window between " +
+                    "Start and Done is what NOOP will measure.",
+                style = NoopType.subhead,
+                color = Palette.textSecondary,
+            )
+            Text(
+                String.format(Locale.US, "%d:%02d elapsed", elapsed / 60, elapsed % 60),
+                style = NoopType.number(28f),
+                color = Palette.accent,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onDone,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                ) { Text("I'm done") }
+                Button(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.surfaceInset, contentColor = Palette.textSecondary),
+                ) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalkConfirmCard(
+    defaultSteps: Int,
+    durationSeconds: Long,
+    onConfirm: (Int) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var steps by remember { mutableStateOf(defaultSteps) }
+    NoopCard(padding = 20.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Overline("How many steps did you actually walk?")
+            StatLine(
+                "Walk duration",
+                String.format(Locale.US, "%d:%02d", durationSeconds / 60, durationSeconds % 60),
+            )
+            Text(
+                "Enter the real count if it wasn't exactly what you planned — accuracy here matters " +
+                    "more than anything else in this flow.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("$steps", style = NoopType.number(24f), color = Palette.textPrimary)
+                Text(
+                    "steps",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                StepperField(
+                    value = "$steps",
+                    accessibility = "Actual step count, $steps",
+                    onMinus = { steps = (steps - WALK_STEP_INCREMENT).coerceAtLeast(WALK_MIN_STEPS) },
+                    onPlus = { steps = (steps + WALK_STEP_INCREMENT).coerceAtMost(WALK_MAX_STEPS) },
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = { onConfirm(steps) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                ) { Text("Calculate") }
+                Button(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.surfaceInset, contentColor = Palette.textSecondary),
+                ) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalkSyncingCard() {
+    NoopCard(padding = 20.dp) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Overline("Syncing your WHOOP")
+            CircularProgressIndicator(color = Palette.accent)
+            Text(
+                "Waiting for your strap to hand over the motion data for your walk. This can take a " +
+                    "little while — keep the app open and your WHOOP nearby.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WalkResultCard(
+    steps: Int,
+    motion: Double,
+    coefficient: Double,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    NoopCard(padding = 20.dp, tint = Palette.accent) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Overline("Walk measured")
+            StatLine("Steps you walked", grouped(steps))
+            StatLine("Strap motion measured", String.format(Locale.US, "%.2f", motion))
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(String.format(Locale.US, "%.1f", coefficient), style = NoopType.number(30f), color = Palette.accent)
+                Text(
+                    "steps per motion unit — this walk alone",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            Text(
+                "This adds one data point to your starter calibration — it won't overwrite anything by " +
+                    "itself. Do at least three walks on different days before NOOP will fit from them.\n\n" +
+                    "A starter calibration is measured while you are walking, but it gets applied to your " +
+                    "whole day, which also contains movement that isn't stepping — so expect it to read " +
+                    "high, and expect it to be labelled low confidence. Once you have a few days where " +
+                    "your phone counted steps alongside the strap, NOOP switches to that instead, and " +
+                    "these walks stop being used.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                ) { Text("Add to calibration") }
+                Button(
+                    onClick = onDiscard,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.surfaceInset, contentColor = Palette.textSecondary),
+                ) { Text("Discard") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalkFailedCard(message: String, onRetry: () -> Unit, onCancel: () -> Unit) {
+    NoopCard(padding = 20.dp, tint = Palette.statusWarning) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Overline("Couldn't calibrate from that walk")
+            Text(message, style = NoopType.subhead, color = Palette.textSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                ) { Text("Retry") }
+                Button(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.surfaceInset, contentColor = Palette.textSecondary),
+                ) { Text("Cancel") }
             }
         }
     }

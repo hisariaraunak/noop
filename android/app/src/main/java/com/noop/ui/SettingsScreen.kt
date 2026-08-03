@@ -262,6 +262,20 @@ class ProfileStore(private val prefs: SharedPreferences) {
      *  null when 0 (auto-fit), the positive value otherwise. */
     val stepsManualOverride: Double? get() = stepsManualCoefficient.takeIf { it > 0 }
 
+    // ── "Calibrate with a walk" in-progress state (StepsWalkCalibrationScreen, Android-only) ──────
+    /** Epoch-seconds start of an in-progress walk-calibration session, 0 = none. Persisted only so
+     *  the flow can resume if the app is backgrounded/killed mid-walk; cleared on save, discard, or
+     *  cancel — never read by the analytics engine. */
+    var stepsWalkStartTs: Long
+        get() = prefs.getLong(KEY_STEPS_WALK_START, 0L)
+        set(v) = prefs.edit().putLong(KEY_STEPS_WALK_START, v).apply()
+
+    /** The step count planned for an in-progress walk (see [stepsWalkStartTs]); reused as the
+     *  default if the flow is resumed after a restart. */
+    var stepsWalkPlannedCount: Int
+        get() = prefs.getInt(KEY_STEPS_WALK_PLANNED, 0)
+        set(v) = prefs.edit().putInt(KEY_STEPS_WALK_PLANNED, v).apply()
+
     /** The auto (Tanaka) HR-max for the current age. */
     val hrMaxAuto: Int get() = Zones.hrMaxTanaka(age)
 
@@ -325,6 +339,8 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_STEPS_CONFIDENCE = "steps_calibration_confidence"
         private const val KEY_STEPS_MANUAL_FLAG = "steps_calibration_manual"
         private const val KEY_STEPS_MANUAL_COEFF = "steps_manual_coefficient"
+        private const val KEY_STEPS_WALK_START = "steps_walk_start_ts"
+        private const val KEY_STEPS_WALK_PLANNED = "steps_walk_planned_count"
 
         private const val AGE_MIN = 13
         private const val AGE_MAX = 100

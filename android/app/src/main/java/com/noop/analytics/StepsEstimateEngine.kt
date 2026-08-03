@@ -33,8 +33,44 @@ object StepsEstimateEngine {
     /** Sanity clamp on a daily estimate. */
     const val MAX_DAILY_STEPS = 60_000
 
+    /**
+     * Confidence ceiling for a BOOTSTRAP fit — one learned from walking-only windows (a manual
+     * calibration walk, or a Health Connect step record's own minutes) rather than from whole days
+     * where the phone independently counted steps.
+     *
+     * Such a fit is applied to WHOLE-DAY motion, but every unit of motion it learned from produced
+     * steps, while a real day also contains movement that produces none (gestures, driving, cooking).
+     * So a bootstrap `k` is systematically HIGH and its daily estimates read as an upper bound rather
+     * than a measurement. Held below [ConfidenceTier]'s LOW/MEDIUM boundary (0.34) so any bootstrap fit
+     * reports as "low confidence" no matter how internally consistent its points were — consistency is
+     * not accuracy, and this is the one case where the two come apart by construction.
+     */
+    const val BOOTSTRAP_MAX_CONFIDENCE = 0.33
+
     /** One calibration day: the strap's motion volume and the phone's step count for the SAME day. */
     data class CalibrationPoint(val motion: Double, val steps: Double)
+
+    /**
+     * Whether the fit must fall back to BOOTSTRAP points (walking-only windows — a calibration walk or a
+     * Health Connect step record's own minutes) instead of the preferred whole-day phone-vs-strap points.
+     *
+     * True only when the whole-day points cannot produce a fit on their own AND there is something to
+     * fall back to. Whole-day points are counted with the SAME filter [calibrate] applies internally, so
+     * this decision and that one can never disagree — a set this reports as sufficient is exactly a set
+     * [calibrate] will accept.
+     *
+     * The two kinds are never blended; see [BOOTSTRAP_MAX_CONFIDENCE] for why they are not
+     * interchangeable. Pure + directly unit-tested, so the fallback rule can't drift unnoticed inside
+     * IntelligenceEngine's much larger scoring pass.
+     */
+    fun shouldUseBootstrap(
+        dayPoints: List<CalibrationPoint>,
+        bootstrapPoints: List<CalibrationPoint>,
+    ): Boolean {
+        if (bootstrapPoints.isEmpty()) return false
+        val usableDays = dayPoints.count { it.motion >= MIN_MOTION_FOR_FIT && it.steps > 0 }
+        return usableDays < MIN_CALIBRATION_DAYS
+    }
 
     /** The fitted (or manually-set) personal model. */
     data class Calibration(

@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.math.min
 
 /*
  * IntelligenceEngine.kt , on-device "intelligence": computes recovery / day-strain /
@@ -224,6 +225,19 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night mean (the
         // historical default) when false. The Context-aware caller reads UnitPrefs.hrvWindow and passes it.
         deepHrvWindow: Boolean = false,
+        // BOOTSTRAP-ONLY (motion, steps) calibration points for a user with no usable whole-day
+        // phone-vs-strap overlap: Health-Connect-WINDOWED points (motion over the same minutes a
+        // StepsRecord actually covers) and manual "calibrate with a walk" points. Context-dependent
+        // persistence (SharedPreferences), so — same rule as baselineEpoch/deepHrvWindow above — the
+        // Context-aware caller reads them and passes plain data down; this layer stays Context-free.
+        //
+        // DELIBERATELY NOT UNIONED with the whole-day points below: the two measure DIFFERENT
+        // quantities and are not interchangeable. A whole day's motion includes plenty of movement that
+        // produces no steps (gestures, driving, cooking), which the whole-day fit silently absorbs into
+        // `k`; a walking-only window has none of it. So k_window > k_day, always, and averaging them
+        // would bias every estimate. These are used ONLY when the whole-day fit cannot run at all —
+        // see [calPoints] below. Default empty so existing callers/tests are unaffected.
+        bootstrapStepsCalibrationPoints: List<StepsEstimateEngine.CalibrationPoint> = emptyList(),
     ): List<Computed> = withContext(Dispatchers.Default) {
         // Serialise the whole pass so overlapping callers never run two rescores in parallel (see
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
@@ -232,7 +246,8 @@ object IntelligenceEngine {
             val (out, healed) = analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow)
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow,
+                bootstrapStepsCalibrationPoints)
             if (healed == 0) out
             // #899 heal re-pass: the pass above deleted overlapping duplicate sleep sessions AFTER its days
             // were scored, and the read-side dedup those days consumed had no bank-recency witness (the fresh
@@ -242,7 +257,8 @@ object IntelligenceEngine {
             else analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow).first
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow,
+                bootstrapStepsCalibrationPoints).first
         }
     }
 
@@ -334,6 +350,8 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night default when
         // false. Threaded into analyzeDay per scored night.
         deepHrvWindow: Boolean = false,
+        // See [analyzeRecent]'s doc — the BOOTSTRAP fallback, used only when the whole-day fit can't run.
+        bootstrapStepsCalibrationPoints: List<StepsEstimateEngine.CalibrationPoint> = emptyList(),
         // #899 heal re-pass: the second component of the return is how many overlapping duplicate sleep
         // sessions the heal below deleted this pass. The public wrapper re-runs ONCE when it is non-zero
         // so the affected days re-score against the cleaned store.
@@ -1164,10 +1182,29 @@ object IntelligenceEngine {
             if (m > 0) motionByDay[dayKey] = m
         }
         // Build calibration points only for days with BOTH a motion volume and a real phone step count.
-        val calPoints = motionByDay.mapNotNull { (day, motion) ->
+        val dayPoints = motionByDay.mapNotNull { (day, motion) ->
             refStepsByDay[day]?.let { StepsEstimateEngine.CalibrationPoint(motion = motion, steps = it) }
         }
+        // Whole-day points are PREFERRED and are never mixed with the bootstrap ones (see the param doc):
+        // `k` fitted from walking-only windows measures a different thing than `k` fitted from whole days,
+        // so blending them would bias every estimate. The fallback rule itself is a pure, unit-tested
+        // function so it can't drift unnoticed inside this pass.
+        val usingBootstrap =
+            StepsEstimateEngine.shouldUseBootstrap(dayPoints, bootstrapStepsCalibrationPoints)
+        val calPoints = if (usingBootstrap) bootstrapStepsCalibrationPoints else dayPoints
         val stepsCal = StepsEstimateEngine.calibrate(calPoints, manualOverride = manualStepCoefficient)
+            // A bootstrap fit is applied to WHOLE-DAY motion but was learned from walking-only windows,
+            // where every unit of motion produced steps. A real day also contains non-stepping movement,
+            // so a bootstrap `k` runs high and its estimates are an upper-ish bound, not a measurement.
+            // Cap the reported confidence so the UI says LOW and never advertises a precision this
+            // cannot have. A manual override is the user's own assertion and is left alone.
+            ?.let { cal ->
+                if (usingBootstrap && !cal.manual) {
+                    cal.copy(confidence = min(cal.confidence, StepsEstimateEngine.BOOTSTRAP_MAX_CONFIDENCE))
+                } else {
+                    cal
+                }
+            }
         if (stepsCal != null) {
             // Estimate + upsert for each recent scored day that has motion but NO real phone step count.
             val estRows = ArrayList<MetricSeriesRow>()

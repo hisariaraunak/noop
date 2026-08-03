@@ -23,8 +23,10 @@ import com.noop.analytics.SleepMark
 import com.noop.analytics.SleepMarkType
 import com.noop.analytics.Sport
 import com.noop.analytics.Calories
+import com.noop.analytics.StepsCalibrationPointStore
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
+import com.noop.analytics.toCalibrationPoints
 import com.noop.analytics.WorkoutSport
 import com.noop.location.GpsSession
 import kotlinx.coroutines.Job
@@ -925,6 +927,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             profileStore.stepsCalibrationConfidence = cal.confidence
                             profileStore.stepsCalibrationManual = cal.manual
                         },
+                        // Bootstrap-only steps-calibration points (Health-Connect windows + manual walks,
+                        // see StepsCalibrationPointStore) — Context-fed the same way baselineEpoch is
+                        // below. The engine uses them ONLY when the whole-day phone-vs-strap fit can't run.
+                        bootstrapStepsCalibrationPoints = StepsCalibrationPointStore.load(appContext).toCalibrationPoints(),
                         // Manual "Recalibrate baseline" anchor (Settings → Charge advanced). The analytics
                         // layer is Context-free, so read the epoch (whole seconds, written as a Long by the
                         // button) here and thread it down — foldHistory drops every HRV night before it.
@@ -1549,6 +1555,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     profileStore.stepsCalibrationConfidence = cal.confidence
                     profileStore.stepsCalibrationManual = cal.manual
                 },
+                bootstrapStepsCalibrationPoints = StepsCalibrationPointStore.load(appContext).toCalibrationPoints(),
                 baselineEpoch = NoopPrefs.of(appContext)
                     .getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble(),
                 recoveryEpoch = NoopPrefs.of(appContext)
@@ -1564,6 +1571,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
             )
         }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
+    }
+
+    /**
+     * Public trigger to force the same re-score [rescoreAfterEdit] does, for a change the periodic loop's
+     * HR-fingerprint gate (`analyzeFp != NoopPrefs.analyzeWatermark`) wouldn't otherwise notice — currently
+     * only a saved "calibrate with a walk" point (StepsWalkCalibrationScreen), which changes
+     * StepsCalibrationPointStore without any new HR data arriving. Without this, the walk would sit
+     * unreflected in Settings/Today until the next unrelated sync/import/edit happened to re-score.
+     */
+    fun rescoreStepsCalibration() {
+        viewModelScope.launch { rescoreAfterEdit() }
     }
 
     /** Re-read every source + the dismissed markers and republish [workouts]. */
