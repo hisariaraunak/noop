@@ -138,6 +138,33 @@ class MergeSleepLocalDayTest {
         assertEquals("whole computed day (incl. stage-less nap) survives", listOf(night.startTs, nap.startTs), merged.map { it.startTs })
     }
 
+    // Second richness exception: a STAGED-but-thin import (e.g. a Health Connect gap-fill sleep record
+    // that raced the strap and landed in the imported slot) must not shadow a materially fuller computed
+    // night forever, even though it has stages (so the #241 exception above doesn't fire for it).
+
+    @Test
+    fun mergeSleep_materiallyFullerComputedOverridesAThinStagedImport() {
+        // Imported: 1h29m with stages (a thin Health Connect capture). Computed: 8h02m with stages (the
+        // strap's own full night) — 5.4x the imported span, well past the override ratio.
+        val imp = session(wake - 89 * 60L, wake, someStages)
+        val comp = session(wake - 8 * 3600L - 2 * 60L, wake, someStages)
+        val merged = WhoopRepository.mergeSleep(imported = listOf(imp), computed = listOf(comp))
+        assertEquals("a materially fuller computed night overrides a thin staged import",
+            listOf(comp.startTs), merged.map { it.startTs })
+    }
+
+    @Test
+    fun mergeSleep_comparableStagedImportStillWinsItsDay() {
+        // 8h imported vs ~10.7h computed: computed is fuller but under the 1.5x override ratio, so the
+        // unchanged imported-wins rule still applies (mergeSleep_importWithStagesStillWinsItsDay's 8h/6h
+        // case already pins the near side of this; this pins a case closer to, but still under, the bar).
+        val imp = session(wake - 8 * 3600L, wake, someStages)
+        val comp = session(wake - 11 * 3600L, wake - 20 * 60L, someStages)
+        val merged = WhoopRepository.mergeSleep(imported = listOf(imp), computed = listOf(comp))
+        assertEquals("under the override ratio, imported still wins its day",
+            listOf(imp.startTs), merged.map { it.startTs })
+    }
+
     /** The Sleep screen calls [WhoopRepository.mergeSleepRichness] directly (it sorts by effectiveStartTs,
      *  not startTs), so pin that it applies the SAME richness rule and returns UNSORTED for the caller. */
     @Test

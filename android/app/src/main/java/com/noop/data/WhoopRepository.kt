@@ -2264,7 +2264,17 @@ class WhoopRepository(private val dao: WhoopDao) {
          *  (ryanbr/noop#241): a sparse import (no stage data on ANY of its sessions that day) must NOT clobber
          *  a computed day that HAS stage data — otherwise a stage-less WHOOP/Apple/HC re-import blanks the
          *  stage breakdown for a night the strap fully staged. Days where the import carries stages, or where
-         *  neither side does, keep the imported-wins rule. Mirrors WhoopStore.SleepMerge (SleepMergeTests). */
+         *  neither side does, keep the imported-wins rule. Mirrors WhoopStore.SleepMerge (SleepMergeTests).
+         *
+         *  Second richness exception (thin-import guard): the FIRST exception only fires when the import has
+         *  ZERO stage data, but a Health Connect gap-fill sleep record always carries stages (however sparse
+         *  its underlying capture), so it never qualified — and HC writes its gap-fill night under the SAME
+         *  "my-whoop" imported id real WHOOP data uses (the write-time "already covered" guard is a one-time
+         *  snapshot that can race the strap's own sync, letting a thin HC record land once and then win every
+         *  day forever). A staged computed day that covers at least [COMPUTED_OVERRIDE_MIN_RATIO]x the
+         *  imported day's captured span is unambiguously the fuller capture, so it wins too — while a
+         *  comparable-or-fuller genuine import (the common case) is untouched, since real imports are rarely
+         *  that much thinner than the strap's own detection. */
         internal fun mergeSleepRichness(
             imported: List<SleepSession>,
             computed: List<SleepSession>,
@@ -2275,15 +2285,27 @@ class WhoopRepository(private val dao: WhoopDao) {
             val out = ArrayList<SleepSession>(imported.size + computed.size)
             for ((day, imp) in importedByDay) {
                 val comp = computedByDay[day]
-                if (comp != null && imp.none { hasStages(it) } && comp.any { hasStages(it) }) {
-                    out.addAll(comp)   // richer computed day survives a stage-less import
+                val compHasStages = comp != null && comp.any { hasStages(it) }
+                val staysStageless = compHasStages && imp.none { hasStages(it) }
+                val materiallyFuller = compHasStages &&
+                    totalDurationMin(comp!!) >= COMPUTED_OVERRIDE_MIN_RATIO * totalDurationMin(imp)
+                if (staysStageless || materiallyFuller) {
+                    out.addAll(comp!!)   // richer (or materially fuller) computed day survives
                 } else {
-                    out.addAll(imp)    // imported wins its day (unchanged rule)
+                    out.addAll(imp)      // imported wins its day (unchanged rule)
                 }
             }
             for ((day, comp) in computedByDay) if (day !in importedByDay) out.addAll(comp)
             return out
         }
+
+        /** See [mergeSleepRichness]'s second richness exception. */
+        private const val COMPUTED_OVERRIDE_MIN_RATIO = 1.5
+
+        /** Total effective-span minutes across a day's sessions (fragment windows summed, no bridging —
+         *  a coarse-but-sufficient "how much did this side actually capture" proxy for the override gate). */
+        private fun totalDurationMin(sessions: List<SleepSession>): Double =
+            sessions.sumOf { (it.endTs - it.effectiveStartTs).coerceAtLeast(0L) } / 60.0
 
         /** True when the session carries a non-empty stage payload; null, "", and "[]" carry none.
          *  Twin of WhoopStore.SleepMerge.hasStages. */
