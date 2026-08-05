@@ -1735,6 +1735,14 @@ private fun NightNavHeader(
     var addingNapStart by remember { mutableStateOf(false) }
     var addingNapEnd by remember { mutableStateOf(false) }
     var napStartTs by remember { mutableStateOf(0L) }
+    // The DRAFTED nap window awaiting an explicit Save. Neither time picker writes by itself — mirroring
+    // the bed/wake edit's own commit funnel below, which already worked this way (#515/#940). Before this,
+    // the second picker's OK persisted the nap immediately, so tapping through both pickers' prefilled
+    // defaults (start = wake + 1h, end = start + 30m) silently banked a nap the user never intended. That
+    // nap then suppressed the whole overlapping night from the sleepSession table, which is how a night
+    // could show as a ~90-minute stub on the Sleep tab while the daily total and trend chart stayed
+    // correct. null = nothing drafted.
+    var pendingNapWindow by remember { mutableStateOf<Pair<Long, Long>?>(null) }
 
     // Commit funnel for the COMPLETE drafted window (#515/#940). Neither picker writes by itself:
     // only Save reaches this function, so an edited bedtime can never be persisted against the old
@@ -1967,7 +1975,8 @@ private fun NightNavHeader(
                         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
                         if (timeInMillis / 1000L <= startTs) add(Calendar.DAY_OF_MONTH, 1)
                     }
-                    onAddNap(startTs, cal.timeInMillis / 1000L)
+                    // Draft it — the explicit Save below is what actually adds the nap.
+                    pendingNapWindow = startTs to (cal.timeInMillis / 1000L)
                     addingNapEnd = false
                     napStartTs = 0L
                 },
@@ -1979,6 +1988,40 @@ private fun NightNavHeader(
             dialog.show()
             onDispose { runCatching { dialog.dismiss() } }
         }
+    }
+
+    // Manual nap (#508) step 3: the explicit SAVE. The two pickers only DRAFT a window; nothing is
+    // written until this is confirmed, so backing out of the flow (or tapping through the prefilled
+    // defaults) can no longer bank a nap the user never meant to add — which previously also erased the
+    // overlapping night from the Sleep tab. Mirrors the bed/wake edit's Save-only commit funnel.
+    val draftedNap = pendingNapWindow
+    if (draftedNap != null) {
+        val (napStart, napEnd) = draftedNap
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingNapWindow = null },
+            containerColor = Palette.surfaceRaised,
+            titleContentColor = Palette.textPrimary,
+            textContentColor = Palette.textSecondary,
+            title = { Text("Add this nap?", style = NoopType.headline) },
+            text = {
+                Text(
+                    "${clockLabelFor(napStart, napEnd)}\n" +
+                        "${durationText((napEnd - napStart) / 60.0)} of sleep will be added.",
+                    style = NoopType.subhead,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onAddNap(napStart, napEnd)
+                    pendingNapWindow = null
+                }) { Text("Save nap", style = NoopType.subhead, color = Palette.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingNapWindow = null }) {
+                    Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213), style = NoopType.subhead, color = Palette.textSecondary)
+                }
+            },
+        )
     }
 
     // #940 guard 2's consent step: the corrected window no longer touches the night's recorded

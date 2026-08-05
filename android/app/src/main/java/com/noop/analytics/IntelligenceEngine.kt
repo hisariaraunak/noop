@@ -1258,7 +1258,19 @@ object IntelligenceEngine {
         // re-emitted here , the engine only writes detected twins), so we simply don't re-insert its
         // detected twin. Sleep has no delete-reinsert pass (unlike dailyMetric/workout), so this IS the
         // idempotency guard for the edited case. Overlap uses the edit's EFFECTIVE window. (#318)
-        val editedWindows = editedRows.map { it.effectiveStartTs to it.endTs }
+        //
+        // Split by WHICH kind of user row it is (see DismissedSleepGuard.ADDED_SESSION_MIN_COVERAGE).
+        // A hand-CORRECTED night always carries a non-null startTsAdjusted and IS the detected night's
+        // twin, so it keeps the unconditional bare-overlap suppression above. A manually-ADDED session
+        // (addManualNap: startTsAdjusted = null) has no detected twin to collide with, so it may only
+        // suppress a detected session it substantially COVERS — otherwise one short logged nap sitting
+        // inside a real night permanently erased that whole night from the sleepSession table (the day
+        // still scored right, so the trend chart looked fine while the Sleep tab's hero showed only the
+        // nap, unhealable because SleepSessionDedup never drops a userEdited row).
+        val correctedWindows = editedRows.filter { it.startTsAdjusted != null }
+            .map { it.effectiveStartTs to it.endTs }
+        val addedWindows = editedRows.filter { it.startTsAdjusted == null }
+            .map { it.effectiveStartTs to it.endTs }
         // #33: also drop any re-detected night the user has DELETED: a dismissedSleep tombstone keeps it
         // from regenerating, mirroring the dismissedWorkout guard. Overlap (not exact startTs) because a
         // re-detected onset drifts as more raw data arrives.
@@ -1267,8 +1279,9 @@ object IntelligenceEngine {
         // "my-whoop-noop") is found. The overlap-suppression predicate lives in DismissedSleepGuard,
         // the JVM-tested twin of Swift's DismissedSleepSpans.
         val dismissedWindows = repo.dismissedSleeps(importedDeviceId).map { it.startTs to it.endTs }
-        val skipWindows = editedWindows + dismissedWindows
+        val skipWindows = correctedWindows + dismissedWindows
         val sleepKept = DismissedSleepGuard.keeping(sleepRows, skipWindows) { it.startTs to it.endTs }
+            .filterNot { DismissedSleepGuard.isCoveredByAdded(it.startTs, it.endTs, addedWindows) }
         if (sleepKept.isNotEmpty()) repo.upsertSleepSessions(sleepKept)
         // ── Persist per-epoch motion (H8) beside each kept session's stagesJSON ──────────────────────────
         // The sleepSession rows exist now (just upserted), so the targeted motion UPDATE lands. Persist ONLY

@@ -57,6 +57,32 @@ public enum DismissedSleepSpans {
         windows.contains { sessionStart < $0.end && $0.start < sessionEnd }
     }
 
+    /// Minimum share of a DETECTED session's OWN span that a manually-ADDED session (`addManualNap`:
+    /// `userEdited = 1`, `startTsAdjusted = nil`) must cover before it suppresses that re-detection.
+    ///
+    /// A hand-CORRECTED night (which always stamps a non-nil `startTsAdjusted`) IS the detected night's
+    /// twin and keeps the unconditional bare-overlap suppression — the #318 double-count guard. A
+    /// manually-ADDED session is NOT a twin: it exists because detection MISSED that window, so it has
+    /// no counterpart to collide with. Under the bare-overlap rule a short logged nap sitting INSIDE a
+    /// real night permanently erased that whole night from the session table, while the day's own score
+    /// (computed from freshly-detected sessions) stayed correct — so the trend read right and only the
+    /// stored-row surfaces were wrong. (Android twin: `DismissedSleepGuard.ADDED_SESSION_MIN_COVERAGE`.)
+    public static let addedSessionMinCoverage = 0.5
+
+    /// True when ANY `addedWindows` entry covers at least `minCoverage` of `[sessionStart, sessionEnd)`
+    /// — the suppression test for manually-ADDED sessions. A zero/negative-span session is never
+    /// suppressed. (Android twin: `DismissedSleepGuard.isCoveredByAdded`.)
+    public static func isCoveredByAdded(sessionStart: Int, sessionEnd: Int,
+                                        addedWindows: [(start: Int, end: Int)],
+                                        minCoverage: Double = addedSessionMinCoverage) -> Bool {
+        let span = sessionEnd - sessionStart
+        guard span > 0 else { return false }
+        return addedWindows.contains { w in
+            let overlap = min(sessionEnd, w.end) - max(sessionStart, w.start)
+            return overlap > 0 && Double(overlap) >= minCoverage * Double(span)
+        }
+    }
+
     /// Whether deleting a night writes a suppression tombstone (#65). A DETECTED night is tombstoned so
     /// the recompute does not regenerate it. A user-created/edited (`userEdited`) night (a hand-corrected
     /// night or a manually-added nap) is deleted WITHOUT a tombstone: it is never re-detected, so

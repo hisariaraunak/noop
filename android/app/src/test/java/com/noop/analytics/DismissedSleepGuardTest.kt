@@ -83,4 +83,44 @@ class DismissedSleepGuardTest {
         val kept = DismissedSleepGuard.keeping(nights, dismissed) { it.start to it.end }
         assertEquals(listOf(Night(100_000, 128_000), Night(300_000, 328_000)), kept)
     }
+
+    // --- Manually-ADDED sessions only suppress a night they substantially cover ---
+    //
+    // The reported failure: a nap logged INSIDE a real night suppressed the WHOLE night from the
+    // sleepSession table permanently. The day still SCORED right (analyzeDay reads freshly-detected
+    // sessions, so the daily total and the trend chart were correct) while the Sleep tab's hero — which
+    // reads the stored rows — showed only the ~90-minute nap, and re-syncing could never heal it because
+    // SleepSessionDedup never drops a userEdited row.
+
+    @Test fun shortAddedNapInsideARealNight_doesNotSuppressTheNight() {
+        // The real night: 23:30 -> 07:05 (7h35m). The logged nap: 05:36 -> 07:05 (89 min), fully inside
+        // it and covering only ~20% of it.
+        val nightStart = 0L
+        val nightEnd = 27_300L                       // 7h35m
+        val nap = listOf(window(22_000L, 27_300L))   // 88 min at the night's tail
+        assertFalse(
+            "a contained nap must not erase the night it sits inside",
+            DismissedSleepGuard.isCoveredByAdded(nightStart, nightEnd, nap),
+        )
+    }
+
+    @Test fun addedSessionCoveringTheSameWindow_stillSuppresses() {
+        // A genuine same-window add (the user logged the night the detector missed, then it later
+        // detected too) DOES suppress: that is the intended "don't re-detect over what I logged".
+        val added = listOf(window(0L, 27_000L))
+        assertTrue(DismissedSleepGuard.isCoveredByAdded(0L, 27_300L, added))
+    }
+
+    @Test fun addedCoverageBoundaryIsInclusiveAtTheThreshold() {
+        // Exactly 50% coverage suppresses; a hair under does not.
+        assertTrue(DismissedSleepGuard.isCoveredByAdded(0L, 1000L, listOf(window(0L, 500L))))
+        assertFalse(DismissedSleepGuard.isCoveredByAdded(0L, 1000L, listOf(window(0L, 499L))))
+    }
+
+    @Test fun addedWindowsNeverSuppressADisjointOrEmptySession() {
+        assertFalse(DismissedSleepGuard.isCoveredByAdded(0L, 1000L, listOf(window(5000L, 9000L))))
+        assertFalse(DismissedSleepGuard.isCoveredByAdded(0L, 1000L, emptyList()))
+        // A zero-width session can never be "covered" (guards the divide-by-span).
+        assertFalse(DismissedSleepGuard.isCoveredByAdded(1000L, 1000L, listOf(window(0L, 9000L))))
+    }
 }
