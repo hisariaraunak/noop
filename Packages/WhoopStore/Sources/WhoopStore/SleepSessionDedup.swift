@@ -25,6 +25,14 @@ public enum SleepSessionDedup {
     /// the absolute overlap is under the 30 min bar (e.g. a 40 min fragment 60% inside the night).
     public static let minOverlapFractionOfShorter = 0.5
 
+    /// Minimum share of the widest overlapping candidate's duration a freshly-banked (#899) copy
+    /// must still cover to keep outranking duration on bank recency alone. A genuine shifted-timebase
+    /// re-bank preserves roughly the whole night's span — but a pass whose raw-data fetch only covered
+    /// PART of the night can bank a drastically shorter fragment under a fresh startTs. Without this
+    /// floor that fragment would outrank — and the heal would DELETE — an already-correct, materially
+    /// longer stored copy of the same night. Below the floor, bank recency no longer overrides duration.
+    public static let freshMinCoverageRatio = 0.5
+
     /// Seconds of overlap between the two sessions' EFFECTIVE spans (edited onsets honoured,
     /// mirroring how display / day assignment place the block). 0 when disjoint.
     static func overlapSeconds(_ a: CachedSleepSession, _ b: CachedSleepSession) -> Int {
@@ -61,12 +69,16 @@ public enum SleepSessionDedup {
     public static func dedupe(_ sessions: [CachedSleepSession], freshStarts: Set<Int> = [])
         -> (kept: [CachedSleepSession], dropped: [CachedSleepSession]) {
         guard sessions.count > 1 else { return (sessions, []) }
+        func duration(_ s: CachedSleepSession) -> Int { max(s.endTs - s.effectiveStartTs, 0) }
+        let widestDuration = sessions.map(duration).max() ?? 0
         func rank(_ s: CachedSleepSession) -> (Int, Int, Int, Int, Int) {
-            (s.userEdited ? 1 : 0,
-             freshStarts.contains(s.startTs) ? 1 : 0,
-             s.endTs - s.effectiveStartTs,
-             s.endTs,
-             s.startTs)
+            let isFresh = freshStarts.contains(s.startTs) &&
+                Double(duration(s)) >= freshMinCoverageRatio * Double(widestDuration)
+            return (s.userEdited ? 1 : 0,
+                    isFresh ? 1 : 0,
+                    duration(s),
+                    s.endTs,
+                    s.startTs)
         }
         let ordered = sessions.sorted { rank($0) > rank($1) }
         var kept: [CachedSleepSession] = []

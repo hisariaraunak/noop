@@ -96,6 +96,22 @@ class SleepSessionDedupTest {
     }
 
     @Test
+    fun drasticallyTruncatedFreshFragment_doesNotEvictACorrectLongerNight() {
+        // A resync pass whose raw-data fetch only covered PART of the night bank a short fragment
+        // under a fresh startTs (not a genuine timebase shift, which preserves the whole span — see
+        // freshBank_winsOverALongerStaleDuplicate). The already-correct, materially longer stored
+        // night must survive: bank recency alone should not truncate a night down to ~19% of itself.
+        val correct = session(midnight - 8 * 3600L, midnight - 30 * 60L) // ~7h30m
+        val truncatedFresh = session(midnight - 90 * 60L, midnight - 30 * 60L) // 1h
+        val result = SleepSessionDedup.dedupe(
+            listOf(correct, truncatedFresh),
+            freshStarts = setOf(truncatedFresh.startTs),
+        )
+        assertEquals("the correct, longer night survives over a drastically truncated fresh copy",
+            listOf(correct.startTs), result.kept.map { it.startTs })
+    }
+
+    @Test
     fun withoutBankRecency_theLongerSessionWins() {
         // Read-side callers have no bank-recency witness: the longer capture of the night wins.
         val long = session(midnight - 2 * 3600L, midnight + 6 * 3600L)  // 8 h

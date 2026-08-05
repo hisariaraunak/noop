@@ -33,6 +33,19 @@ object SleepSessionDedup {
      */
     const val MIN_OVERLAP_FRACTION_OF_SHORTER: Double = 0.5
 
+    /**
+     * Minimum share of the widest overlapping candidate's duration a freshly-banked (#899) copy
+     * must still cover to keep outranking duration on bank recency alone. A genuine shifted-timebase
+     * re-bank preserves roughly the whole night's span (see [MIN_OVERLAP_FRACTION_OF_SHORTER]'s
+     * "phantom tail" case, still a few hours either way) — but a pass whose raw-data fetch only
+     * covered PART of the night (a resync gap, an off-wrist HR span split differently this time) can
+     * bank a drastically shorter fragment under a fresh startTs. Without this floor that fragment
+     * would outrank — and the heal would DELETE — an already-correct, materially longer stored copy
+     * of the same night, truncating it on the Sleep tab even though nothing else about the night
+     * changed. Below the floor, bank recency no longer overrides duration.
+     */
+    const val FRESH_MIN_COVERAGE_RATIO: Double = 0.5
+
     /** The collapse outcome: canonical survivors + the duplicates dropped, both sorted by startTs. */
     data class Result(val kept: List<SleepSession>, val dropped: List<SleepSession>)
 
@@ -65,9 +78,12 @@ object SleepSessionDedup {
      *   1. [SleepSession.userEdited]: a hand-corrected night is never dropped (matching the
      *      engine's existing edited-window upsert guard, where the user's correction always
      *      outranks re-detection).
-     *   2. Bank recency: startTs in [freshStarts]. The row model has no banked-at column, so
-     *      recency is witnessed by the CALLER passing the keys it banked this pass; the freshly
-     *      detected copy reflects the strap's current timebase and is the truth to keep.
+     *   2. Bank recency: startTs in [freshStarts], but ONLY when the candidate still covers at
+     *      least [FRESH_MIN_COVERAGE_RATIO] of the widest session in the input — see that
+     *      constant's doc for why a drastically shorter "fresh" fragment must not win on
+     *      recency alone. The row model has no banked-at column, so recency is witnessed by the
+     *      CALLER passing the keys it banked this pass; a freshly detected copy that still spans
+     *      most of the night reflects the strap's current timebase and is the truth to keep.
      *   3. Longest effective duration: the fullest capture of the night.
      *   4. Latest endTs, then latest startTs: a stable total order so ties break the same way on
      *      every run and platform.
@@ -78,10 +94,15 @@ object SleepSessionDedup {
      */
     fun dedupe(sessions: List<SleepSession>, freshStarts: Set<Long> = emptySet()): Result {
         if (sessions.size < 2) return Result(sessions, emptyList())
+        fun durationOf(s: SleepSession) = (s.endTs - s.effectiveStartTs).coerceAtLeast(0L)
+        val widestDuration = sessions.maxOf { durationOf(it) }
         val ordered = sessions.sortedWith(
             compareByDescending<SleepSession> { it.userEdited }
-                .thenByDescending { it.startTs in freshStarts }
-                .thenByDescending { it.endTs - it.effectiveStartTs }
+                .thenByDescending {
+                    it.startTs in freshStarts &&
+                        durationOf(it) >= FRESH_MIN_COVERAGE_RATIO * widestDuration
+                }
+                .thenByDescending { durationOf(it) }
                 .thenByDescending { it.endTs }
                 .thenByDescending { it.startTs },
         )
