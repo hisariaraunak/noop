@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
@@ -48,8 +49,13 @@ import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
@@ -4333,7 +4339,9 @@ private fun MetricGrid(
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
             )
         },
-    )
+    ).mapValues { (metric, tile) ->
+        tile.copy(icon = keyMetricIcon(metric), polarity = keyMetricPolarity(metric))
+    }
 
     // Resolve the enabled tiles to their descriptors (keeping the metric for the tap mapping), dropping
     // any unknown key defensively.
@@ -4418,17 +4426,51 @@ private data class KeyTileData(
     val tint: Color,
     val frac: Double?,
     val spark: List<Double> = emptyList(),
+    // Leading glyph beside the label; null draws no icon (e.g. Blood Oxygen, which never actually
+    // populates on a WHOOP 4.0 — an icon on a tile that only ever reads "No Data" is wasted chrome).
+    val icon: ImageVector? = null,
+    val polarity: MetricPolarity = MetricPolarity.NEUTRAL,
 )
 
+/** Whether a RISING value is good, bad, or neither — decides the trend delta's colour (never its
+ *  direction, which always just reflects the arithmetic). Effort, Respiratory, Weight and Calories stay
+ *  [NEUTRAL]: none has an uncomplicated "more/less is better", so their delta reads in plain grey rather
+ *  than guessing. */
+private enum class MetricPolarity { HIGHER_IS_BETTER, LOWER_IS_BETTER, NEUTRAL }
+
+/** Leading icon per Key-Metric tile (Option B, "with icon"). Reuses icons already carrying that meaning
+ *  elsewhere in the app (Bedtime = Sleep/Rest, Air = Breathe/Respiratory) so a tile's glyph is never the
+ *  first time the user has seen it mean that. Blood Oxygen has none — see [KeyTileData.icon]. */
+private fun keyMetricIcon(metric: KeyMetric): ImageVector? = when (metric) {
+    KeyMetric.CHARGE -> Icons.Filled.Bolt
+    KeyMetric.EFFORT -> Icons.AutoMirrored.Filled.DirectionsRun
+    KeyMetric.REST -> Icons.Filled.Bedtime
+    KeyMetric.HRV -> Icons.Filled.MonitorHeart
+    KeyMetric.RESTING_HR -> Icons.Filled.Favorite
+    KeyMetric.BLOOD_OXYGEN -> null
+    KeyMetric.RESPIRATORY -> Icons.Filled.Air
+    KeyMetric.STEPS -> Icons.AutoMirrored.Filled.DirectionsWalk
+    KeyMetric.WEIGHT -> Icons.Filled.MonitorWeight
+    KeyMetric.CALORIES -> Icons.Filled.LocalFireDepartment
+}
+
+private fun keyMetricPolarity(metric: KeyMetric): MetricPolarity = when (metric) {
+    KeyMetric.CHARGE, KeyMetric.REST, KeyMetric.HRV, KeyMetric.STEPS -> MetricPolarity.HIGHER_IS_BETTER
+    KeyMetric.RESTING_HR -> MetricPolarity.LOWER_IS_BETTER
+    KeyMetric.BLOOD_OXYGEN -> MetricPolarity.HIGHER_IS_BETTER
+    KeyMetric.EFFORT, KeyMetric.RESPIRATORY, KeyMetric.WEIGHT, KeyMetric.CALORIES -> MetricPolarity.NEUTRAL
+}
+
 /**
- * One iOS `ktile`: a compact 3-column tile — a 9sp / +1.2 overline label, the value (number 17) + small
- * unit (caption), and a thin 8dp [LiquidTube] fill bar tinted [KeyTileData.tint] to [KeyTileData.frac].
- * Flat surfaceRaised fill + a 16dp-corner hairline (iOS ktile background), padding 12h / 11v. Replaces the
- * old tall 2-column SparkStatTile. A No-Data value dims and the tube reads empty.
+ * A 2-column Key-Metric tile ("Option B"): a defined 1dp hairline card, a leading icon beside the
+ * overline label, the value at real size, a trend delta against the trailing window's prior-day average,
+ * and a slim [LiquidTube] fill bar. Replaces the old borderless 3-column tile — two columns bought the
+ * width for the icon + delta row without crowding the value. A No-Data value dims, drops its delta, and
+ * the tube reads empty.
  *
  * [detailed] (the #251 editor's "Detailed tiles" switch): the tile grows a 14-day trend [Sparkline] in the
  * metric's tint under the fill bar — taller/squarer, per the tester mock. A metric with no windowed series
- * (Steps/Weight/Calories) or fewer than two points stays tube-only, so no tile ever draws a fake flat line.
+ * (Weight) or fewer than two points stays tube-only, so no tile ever draws a fake flat line.
  */
 @Composable
 private fun LiquidKeyTile(
@@ -4438,6 +4480,17 @@ private fun LiquidKeyTile(
     modifier: Modifier = Modifier,
 ) {
     val hasValue = data.value != NO_DATA
+    // The trend delta: TODAY (the trailing window's last point) against the AVERAGE of the days before
+    // it — never today against itself. A single-point window (day one, or a metric that just started
+    // reporting) has no "before", so no delta shows rather than a fabricated 0%.
+    val today = data.spark.lastOrNull()
+    val priorDays = data.spark.dropLast(1)
+    val priorAvg = priorDays.takeIf { it.isNotEmpty() }?.average()
+    val deltaPct = if (hasValue && today != null && priorAvg != null && priorAvg != 0.0) {
+        (today - priorAvg) / priorAvg * 100.0
+    } else {
+        null
+    }
     // Tap -> the tile's focused trend detail (the Sleep night-detail tile idiom): liquidPress on the
     // tappable tile, indication = null so only the liquid settle shows. A null onClick keeps the tile
     // inert with zero modifier overhead (byte-identical to before).
@@ -4451,28 +4504,61 @@ private fun LiquidKeyTile(
     }
     Column(
         modifier = base
-            .clip(RoundedCornerShape(16.dp))
-            .frostedCardSurface(cornerRadius = 16.dp)
-            .padding(horizontal = 14.dp, vertical = 13.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .padding(horizontal = 13.dp, vertical = 12.dp)
             .semantics { contentDescription = uiString(R.string.l10n_today_screen_data_label_data_value_data_unit_27f6fd6b, data.label, data.value, data.unit).trim() },
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // A small tint dot ahead of the label: the metric's colour otherwise only appeared in the fill
-        // bar at the very bottom of the tile, so a glance at the label had nothing tying it to its bar.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(5.dp)
-                    .clip(CircleShape)
-                    .background(if (hasValue) data.tint else Palette.textTertiary),
-            )
-            Text(
-                data.label.uppercase(),
-                style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
-                color = Palette.textTertiary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                if (data.icon != null) {
+                    Icon(
+                        data.icon,
+                        contentDescription = null,
+                        tint = if (hasValue) data.tint else Palette.textTertiary,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+                Text(
+                    data.label.uppercase(),
+                    style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
+                    color = Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (deltaPct != null) {
+                val rising = deltaPct >= 0
+                val deltaColor = when (data.polarity) {
+                    MetricPolarity.NEUTRAL -> Palette.textTertiary
+                    MetricPolarity.HIGHER_IS_BETTER -> if (rising) Palette.statusPositive else Palette.statusCritical
+                    MetricPolarity.LOWER_IS_BETTER -> if (rising) Palette.statusCritical else Palette.statusPositive
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Icon(
+                        when {
+                            kotlin.math.abs(deltaPct) < 0.5 -> Icons.AutoMirrored.Filled.TrendingFlat
+                            rising -> Icons.AutoMirrored.Filled.TrendingUp
+                            else -> Icons.AutoMirrored.Filled.TrendingDown
+                        },
+                        contentDescription = null,
+                        tint = deltaColor,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        "${kotlin.math.abs(deltaPct).roundToInt()}%",
+                        style = NoopType.caption,
+                        color = deltaColor,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -4494,6 +4580,19 @@ private fun LiquidKeyTile(
                 )
             }
         }
+        // The window's prior-day average — the same days [deltaPct] compares today against, spelled out
+        // so the percentage above isn't a bare, unexplained number. Follows the value's own formatting
+        // scale (grouped thousands for a large mean like Steps, else a plain rounded integer).
+        if (hasValue && priorAvg != null) {
+            val avgText = if (priorAvg >= 1000) grouped(priorAvg.roundToInt()) else priorAvg.roundToInt().toString()
+            Text(
+                "${priorDays.size}-day avg $avgText${if (data.unit.isNotEmpty()) " ${data.unit}" else ""}",
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         // Detailed rows are height-equalised (fillMaxHeight): pin the bar + graph to the bottom edge so a
         // graph-less tile's bar lines up with its neighbours' bars rather than floating mid-card.
         if (detailed) Spacer(Modifier.weight(1f))
@@ -4502,7 +4601,7 @@ private fun LiquidKeyTile(
             tint = data.tint,
             // Slimmer track (was 8dp): with the value now carrying the tile, the bar is a supporting
             // gauge rather than a second headline competing with it.
-            height = 4.dp,
+            height = 3.dp,
             animated = false,
             modifier = Modifier.fillMaxWidth(),
         )
