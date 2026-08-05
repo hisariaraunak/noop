@@ -53,6 +53,11 @@ internal fun lastWorkoutsFeed(rows: List<WorkoutRow>): List<WorkoutRow> =
 /** S5: the Key-Metric overflow cap, mirroring TodayView.metricsCollapsedCap (two columns, three rows). */
 internal const val METRICS_COLLAPSED_CAP = 6
 
+/** Columns in the Key-Metrics grid. Two, so each tile has room for a full-size number and its unit; at
+ *  three-up a phone gave each tile ~100dp and long values ("7,468") crowded their own label. The
+ *  collapsed cap above is a multiple of this, so a collapsed grid never ends on a half-empty row. */
+internal const val KEY_METRIC_COLUMNS = 2
+
 /** The Weight tile's display string and an honest caption. */
 internal data class WeightTileText(val value: String, val caption: String?)
 

@@ -360,20 +360,6 @@ fun TodayScreen(
     // Keep the explicit calendar date visible alongside Today/Yesterday so the logical-day remap stays
     // honest, between midnight and 04:00 "Today" still points at the prior calendar date, and showing
     // that date makes it obvious which day's row is on screen (#144).
-    val dayLabel = remember(selectedDayOffset, selectedDay, selectedDayKey) {
-        // Date the label by the row ACTUALLY on screen, not the raw logical date. `selectedDayKey` already
-        // follows the resolver's `today?.day` at offset 0, so when the resolver surfaces yesterday's
-        // complete row (today not scored yet) the date now reads that row's day, instead of stamping
-        // "Today · <today>" over yesterday's values, which disagreed with the Intelligence History row for
-        // the same data (#434). iOS/Mac already label by the shown row's day; this brings Android to parity.
-        val keyDate = runCatching { LocalDate.parse(selectedDayKey) }.getOrNull() ?: selectedDay
-        val date = keyDate.format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.US))
-        when (selectedDayOffset) {
-            0 -> "Today · $date"
-            1 -> "Yesterday · $date"
-            else -> date
-        }
-    }
     // Display-only unit system + the SI profile weight, read once like every other Settings-backed
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
@@ -1006,14 +992,6 @@ fun TodayScreen(
 
     // One honest card-level badge, matching LiquidTodayView: identical winners collapse to one label;
     // mixed winners show at most two sources in Charge / Effort / Rest order so the pill stays compact.
-    val heroSourceLabel = remember(providerByMetric, carriedRecoveryProvider, displayMetric?.recovery, lastScoredCharge) {
-        scoreHeroSourceLabel(
-            providerByMetric = providerByMetric,
-            carriedRecoveryProvider = carriedRecoveryProvider,
-            usesCarriedRecovery = displayMetric?.recovery == null && lastScoredCharge != null,
-        )
-    }
-
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = rememberTrendWindow(days, selectedDay, keyMetricsWindowDays)
@@ -1186,11 +1164,10 @@ fun TodayScreen(
                 onOpenSettings = onOpenSettings,
                 onOpenDevices = onOpenDevices,
             )
-            // WORDMARK (iOS LiquidWordmark parity): a subtle centred "N O O P" @ ~50% opacity, with a
-            // tap easter egg. Shares its row with the Arrange affordance — wordmark centred, Arrange
-            // aligned to the trailing edge — so neither needs its own empty band.
+            // The decorative centred "N O O P" wordmark used to sit here. Removed: it was a full row of
+            // branding on the screen the user opens most, telling them nothing they don't know. The
+            // Customize affordance keeps the row and stays on the trailing edge.
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                LiquidWordmark()
                 // One consistent customization affordance for section order and visibility.
                 TextButton(
                     onClick = { showLayoutEditor = true },
@@ -1326,6 +1303,10 @@ fun TodayScreen(
         // neighbours as it crosses their centres (the screen-level frame loop also auto-scrolls at the
         // viewport edges and keeps swapping while it does), and the order persists on drop. The stagger
         // index follows the section's live position.
+        // Tracks whether any section has been emitted yet, so only the SECOND onward gets a leading
+        // hairline (see TodayReorderableSection.showDivider). Safe to keep as a plain var: this loop runs
+        // while BUILDING the lazy list, not during the composition of an item.
+        var renderedASection = false
         sectionOrder.filterNot { it in hiddenSections }.forEach { section ->
             // Entrance stagger keyed on the section's FIXED default position, not its live position: the
             // stagger only matters on first appearance (staggeredAppear latches), and a live-position
@@ -1350,12 +1331,15 @@ fun TodayScreen(
                 else -> true
             }
             if (!sectionVisible) return@forEach
+            val showSectionDivider = renderedASection
+            renderedASection = true
             item(key = TODAY_SECTION_KEY_PREFIX + section.raw) {
                 TodayReorderableSection(
                     section = section,
                     listState = todayListState,
                     drag = sectionDrag,
                     onDrop = { TodayLayoutPrefs.setOrder(context, sectionOrder) },
+                    showDivider = showSectionDivider,
                 ) {
                     when (section) {
                         // HERO, three equal Charge / Effort / Rest liquid vessels in the compact pinned-dark
@@ -1388,9 +1372,11 @@ fun TodayScreen(
                                     lastScoredCharge = lastScoredCharge,
                                     effortScale = effortScale,
                                     liveTodayStrain = if (selectedDayOffset == 0) liveTodayStrain else null,
-                                    heroSourceLabel = heroSourceLabel,
                                     onScoreInfo = openGuide,
-                                    onChargeTap = { showChargeBreakdown = true },
+                                    // Each ring opens its own detail trend. The Charge BREAKDOWN sheet the
+                                    // Charge ring used to open is unchanged and still reachable from the
+                                    // Readiness card's "what shaped it" tap.
+                                    onOpenMetric = onOpenMetric,
                                 )
                             }
                             // Honest "why is Effort 0?" caption — only when today's Effort is a real
@@ -1459,7 +1445,10 @@ fun TodayScreen(
                         ) {
                             Row(verticalAlignment = Alignment.Top) {
                                 Box(modifier = Modifier.weight(1f)) {
-                                    SectionHeader("Key Metrics", overline = dayLabel, trailing = trendWindowLabel(keyMetricsWindowDays))
+                                    // No date overline: the screen header already says "Today · <date>", and
+                                    // repeating it on every section made the same string appear three times
+                                    // on one scroll. The trailing trend window still qualifies the tiles.
+                                    SectionHeader("Key Metrics", trailing = trendWindowLabel(keyMetricsWindowDays))
                                 }
                                 TodayEditAction(
                                     onClick = { showMetricsEditor = true },
@@ -2260,73 +2249,6 @@ private fun LiquidBatteryRing(batteryPct: Double?, onClick: () -> Unit) {
     }
 }
 
-// MARK: - NOOP wordmark (iOS LiquidWordmark parity — centred, with a tap easter egg)
-//
-// The subtle "N O O P" wordmark that sits on the sky between the header and the hero. Built as a row of
-// letters (not one tracked string, which adds a trailing gap after the last glyph and pushes the word
-// off-centre), so it sits DEAD centre, white @ ~50% opacity. A tap plays one of several random one-shot
-// animations — wiggle / shake / flip / spin / bounce / jelly squash. Mirrors iOS LiquidWordmark.
-
-@Composable
-private fun LiquidWordmark() {
-    val reduced = rememberReduceMotion()
-    var rot by remember { mutableStateOf(0f) }        // z-rotation (wiggle / spin)
-    var scaleX by remember { mutableStateOf(1f) }     // horizontal scale (jelly squash)
-    var scaleY by remember { mutableStateOf(1f) }     // vertical scale (bounce / jelly)
-    var dx by remember { mutableStateOf(0f) }         // horizontal offset (shake)
-    var egg by remember { mutableIntStateOf(0) }      // which egg to play (drives the LaunchedEffect)
-
-    val view = LocalView.current
-    val animRot by animateFloatAsState(rot, tween(durationMillis = if (reduced) 0 else 520), label = uiString(R.string.l10n_today_screen_wordmark_rot_21de874b))
-    val animScaleX by animateFloatAsState(scaleX, tween(durationMillis = if (reduced) 0 else 380), label = uiString(R.string.l10n_today_screen_wordmark_sx_68fa7b60))
-    val animScaleY by animateFloatAsState(scaleY, tween(durationMillis = if (reduced) 0 else 380), label = uiString(R.string.l10n_today_screen_wordmark_sy_7b8bd743))
-    val animDx by animateFloatAsState(dx, tween(durationMillis = if (reduced) 0 else 420), label = uiString(R.string.l10n_today_screen_wordmark_dx_d428284f))
-
-    // On each tap, kick a value to an extreme then settle it back so the animateFloatAsState eases through
-    // to rest — a natural wobble without hand-authored keyframes. Six variants, chosen at random per tap.
-    LaunchedEffect(egg) {
-        if (egg == 0) return@LaunchedEffect
-        when ((0..5).random()) {
-            0 -> { rot = -12f; kotlinx.coroutines.delay(90); rot = 0f }            // wiggle
-            1 -> { dx = -12f; kotlinx.coroutines.delay(90); dx = 0f }              // shake
-            2 -> { rot += 360f }                                                    // spin
-            3 -> { scaleX = 1.28f; scaleY = 1.28f; kotlinx.coroutines.delay(90); scaleX = 1f; scaleY = 1f } // bounce
-            4 -> { scaleX = 1.35f; scaleY = 0.7f; kotlinx.coroutines.delay(90); scaleX = 1f; scaleY = 1f }  // jelly
-            else -> { rot += 360f }                                                 // flip (spin twin)
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                egg += 1
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-            }
-            .graphicsLayer {
-                rotationZ = animRot
-                this.scaleX = animScaleX
-                this.scaleY = animScaleY
-                translationX = animDx
-            }
-            .clearAndSetSemantics {}, // decorative wordmark — invisible to TalkBack
-        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        "NOOP".forEach { ch ->
-            Text(
-                ch.toString(),
-                style = NoopType.number(16f, weight = FontWeight.Bold)
-                    .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.25f), offset = Offset(0f, 1f), blurRadius = 6f)),
-                color = Color.White.copy(alpha = 0.5f),
-            )
-        }
-    }
-}
-
 // MARK: - Score hero row, three Charge / Effort / Rest score vessels
 //
 // The liquid Today hero: three equal daily-score vessels in Charge / Effort / Rest order, with a tappable
@@ -2340,12 +2262,13 @@ private fun ScoreHeroRow(
     lastScoredCharge: LastCharge? = null,
     effortScale: EffortScale,
     liveTodayStrain: Double? = null,
-    // One card-level provenance label derived from the three REAL per-metric merge winners upstream.
-    heroSourceLabel: String? = null,
+    // Opens a score's own detail trend (vital_detail/<key>) — the SAME destination its Key Metrics tile
+    // uses, so "tap the thing, see its history" holds wherever the score appears. Each ring is wired to
+    // it below; the label chevron underneath keeps opening the what-does-this-mean explainer.
+    onOpenMetric: (String) -> Unit = {},
     onScoreInfo: (ScoreSection) -> Unit,
     // A1 (#514/#706): tapping the Charge ring opens the breakdown sheet. A small chevron cue overlays the
     // ring's bottom edge INSIDE the ring frame, so it adds no stacked height (the #762 self-sizing parity).
-    onChargeTap: (() -> Unit)? = null,
 ) {
     val recovery = day?.recovery
     // Prefer the live in-progress Effort for today, but never BELOW the day's already-earned strain
@@ -2393,7 +2316,7 @@ private fun ScoreHeroRow(
                 HeroRingColumn(
                     domain = DomainTheme.Charge,
                     onInfo = { onScoreInfo(ScoreSection.CHARGE) },
-                    onRingTap = onChargeTap,
+                    onRingTap = { onOpenMetric("recovery") },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         // #802: when today has no Charge yet but a prior night's value is carried, draw a
@@ -2429,7 +2352,11 @@ private fun ScoreHeroRow(
                     }
                 }
                 // EFFORT, strain on the gauge, on the user's selected scale, as a liquid vessel.
-                HeroRingColumn(domain = DomainTheme.Effort, onInfo = { onScoreInfo(ScoreSection.EFFORT) }) {
+                HeroRingColumn(
+                    domain = DomainTheme.Effort,
+                    onInfo = { onScoreInfo(ScoreSection.EFFORT) },
+                    onRingTap = { onOpenMetric("strain") },
+                ) {
                     Box(contentAlignment = Alignment.Center) {
                         HeroScoreVessel(
                             fraction = if (effortOutOf > 0) effortVal / effortOutOf else 0.0,
@@ -2449,6 +2376,7 @@ private fun ScoreHeroRow(
                     HeroRingColumn(
                         domain = DomainTheme.Rest,
                         onInfo = { onScoreInfo(ScoreSection.REST) },
+                        onRingTap = { onOpenMetric("rest") },
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             HeroScoreVessel(
@@ -2470,20 +2398,9 @@ private fun ScoreHeroRow(
                             }
                         }
                     }
-                    if (heroSourceLabel != null) {
-                        SourceBadge(
-                            text = heroSourceLabel,
-                            tint = Palette.onDarkSecondary,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                // Measure the full label even when it is wider than the Rest vessel, then
-                                // let it overflow left while preserving the vessel-aligned trailing edge.
-                                .wrapContentWidth(unbounded = true, align = Alignment.End)
-                                // Match iOS: centre the pill on the card border, aligned with the Rest vessel.
-                                .offset(y = -(Metrics.space16 + Metrics.sourceBadgeHeight / 2))
-                                .semantics { contentDescription = uiString(R.string.l10n_today_screen_source_herosourcelabel_d3363687, heroSourceLabel) },
-                        )
-                    }
+                    // The floating "WHOOP" source pill that sat on the hero card's top edge is gone: with a
+                    // single strap it named the only source the user has, on every single day. Provenance
+                    // still lives — in full, per source — in the Data Sources section at the foot of Today.
                 }
             }
         }
@@ -3639,6 +3556,11 @@ private fun LazyItemScope.TodayReorderableSection(
     listState: LazyListState,
     drag: TodaySectionDragState,
     onDrop: () -> Unit,
+    // Draw a hairline above this section, so each one reads as its own block instead of the whole screen
+    // running together as one column of cards. False for the FIRST rendered section (nothing to divide it
+    // from) — the caller tracks that, since which sections render depends on data + the hidden list. The
+    // rule travels WITH the section through a drag, so a reorder can never leave a stray leading rule.
+    showDivider: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val key = TODAY_SECTION_KEY_PREFIX + section.raw
@@ -3736,7 +3658,16 @@ private fun LazyItemScope.TodayReorderableSection(
                     },
                 )
             },
-    ) { content() }
+    ) {
+        if (showDivider) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                HorizontalDivider(color = Palette.hairline)
+                content()
+            }
+        } else {
+            content()
+        }
+    }
 }
 
 /**
@@ -4429,10 +4360,12 @@ private fun MetricGrid(
     val hasOverflow = allTiles.size > METRICS_COLLAPSED_CAP
     val tiles = if (metricsExpanded || !hasOverflow) allTiles else allTiles.take(METRICS_COLLAPSED_CAP)
 
-    // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
-    // and a partial last row pads with empty weight so the columns stay aligned.
+    // TWO columns, not three: at three-up a phone gave each tile ~100dp, which truncated long values and
+    // left the label, number and bar stacked shoulder-to-shoulder. Two columns give the number room to be
+    // the thing you read. Build from rows so tile heights tile uniformly and a partial last row pads with
+    // empty weight so the columns stay aligned.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(3).forEach { rowTiles ->
+        tiles.chunked(KEY_METRIC_COLUMNS).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -4448,7 +4381,7 @@ private fun MetricGrid(
                         modifier = Modifier.weight(1f).then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(KEY_METRIC_COLUMNS - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         // S5: the "Show all metrics" / "Show fewer" expander — a centered link like iOS. Toggles visibility
@@ -4520,21 +4453,33 @@ private fun LiquidKeyTile(
         modifier = base
             .clip(RoundedCornerShape(16.dp))
             .frostedCardSurface(cornerRadius = 16.dp)
-            .padding(horizontal = 12.dp, vertical = 11.dp)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
             .semantics { contentDescription = uiString(R.string.l10n_today_screen_data_label_data_value_data_unit_27f6fd6b, data.label, data.value, data.unit).trim() },
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text(
-            data.label.uppercase(),
-            style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
-            color = Palette.textTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // A small tint dot ahead of the label: the metric's colour otherwise only appeared in the fill
+        // bar at the very bottom of the tile, so a glance at the label had nothing tying it to its bar.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(if (hasValue) data.tint else Palette.textTertiary),
+            )
+            Text(
+                data.label.uppercase(),
+                style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 data.value,
-                style = NoopType.number(17f),
+                // Two columns bought the width for a properly-sized number — this is the one thing on the
+                // tile the user is actually reading.
+                style = NoopType.number(22f),
                 color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                 maxLines = 1,
             )
@@ -4542,7 +4487,9 @@ private fun LiquidKeyTile(
                 Text(
                     uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
                     style = NoopType.caption,
-                    color = Palette.textPrimary,
+                    // Demoted to secondary: the unit is a qualifier, and at full primary weight it competed
+                    // with the value beside it.
+                    color = Palette.textSecondary,
                     maxLines = 1,
                 )
             }
@@ -4553,7 +4500,9 @@ private fun LiquidKeyTile(
         LiquidTube(
             frac = data.frac ?: 0.0,
             tint = data.tint,
-            height = 8.dp,
+            // Slimmer track (was 8dp): with the value now carrying the tile, the bar is a supporting
+            // gauge rather than a second headline competing with it.
+            height = 4.dp,
             animated = false,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -4701,11 +4650,6 @@ private fun HeartRateTrendCard(
                 .filter { it.startTs <= end && it.endTs >= start }
         }.getOrDefault(emptyList())
     }
-    val selectedLabel = when (selectedDay) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
-        else -> selectedDay.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
-    }
 
     // #985 view-only narrowing (the #829 rule): the selected window filters the loaded 5-minute buckets,
     // anchored at the wall clock when the inputs change. A live reload refreshes `buckets`, so the anchor
@@ -4724,7 +4668,7 @@ private fun HeartRateTrendCard(
     // too-narrow rolling window (say 1h with no recent offload) is never a dead end — the user widens it
     // or steps back to Today, and the message says which window came up empty.
     if (winBuckets.size < 2) {
-        SectionHeader("Heart Rate", overline = selectedLabel)
+        SectionHeader("Heart Rate")
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Overline("Beats per minute")
@@ -4782,7 +4726,7 @@ private fun HeartRateTrendCard(
     }
     val visTimestamps = remember(visBuckets) { visBuckets.map { it.bucket } }
 
-    SectionHeader("Heart Rate", overline = selectedLabel)
+    SectionHeader("Heart Rate")
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Header, mirrors the macOS ChartCard (title + subtitle, trailing read-out).
