@@ -1459,6 +1459,8 @@
     <string name="l10n_today_screen_no_cardio_load_yet_effort_builds_e952006c">Aún no hay carga cardiovascular. El Esfuerzo se acumula cuando tu frecuencia cardíaca sube a tu zona de esfuerzo (alrededor del 50% de tu reserva de frecuencia cardíaca). Un día tranquilo, honestamente, marca cerca de cero.</string>
     <string name="l10n_today_screen_pct_ee63e247">%1$s%%</string>
     <string name="l10n_today_screen_profile_and_settings_9b3d12f2">Perfil y ajustes</string>
+    <string name="l10n_today_screen_charge_d4e1aee4">Carga</string>
+    <string name="l10n_today_screen_effort_8c974bc6">Esfuerzo</string>
     <string name="l10n_today_screen_recovery_ea924f72">Recuperación</string>
     <string name="l10n_today_screen_sync_chip_now_c9bc849a">ahora</string>
     <string name="l10n_today_screen_sync_chip_live_98aadb37">en vivo</string>

@@ -4287,7 +4287,10 @@ private fun MetricGrid(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
             KeyTileData(
-                label = uiString(R.string.l10n_today_screen_recovery_ea924f72),
+                // "Charge", matching the hero ring above it and KeyMetric.CHARGE.title. The tile used to
+                // read "Recovery" — the pre-rename name — so the SAME score was called two different
+                // things a few hundred pixels apart (and a third, "Charge", in the Edit sheet).
+                label = uiString(R.string.l10n_today_screen_charge_d4e1aee4),
                 value = d?.recovery?.let { "${it.roundToInt()}" }
                     ?: recoveryCalibration?.let { "$it/${Baselines.minNightsSeed}" }
                     ?: lastScoredCharge?.let { "${it.value.roundToInt()}" } ?: NO_DATA,
@@ -4298,7 +4301,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.EFFORT to KeyTileData(
-            label = uiString(R.string.l10n_today_screen_strain_79fe380e),
+            // "Effort", matching the hero ring above it and KeyMetric.EFFORT.title (was "Strain").
+            label = uiString(R.string.l10n_today_screen_effort_8c974bc6),
             // #1001: the resolved Effort, falling back to the stored column only when the caller passes
             // none (previews/tests). Reading `d.strain` here is what left this tile behind the hero ring.
             value = (effortForDay ?: d?.strain)?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: NO_DATA,

@@ -1638,6 +1638,8 @@
     <string name="l10n_today_screen_no_cardio_load_yet_effort_builds_e952006c">No cardio load yet. Effort builds once your heart rate climbs into your effort zone (around 50% of your heart-rate reserve). A calm day honestly reads near zero.</string>
     <string name="l10n_today_screen_pct_ee63e247">%1$s%%</string>
     <string name="l10n_today_screen_profile_and_settings_9b3d12f2">Profile and settings</string>
+    <string name="l10n_today_screen_charge_d4e1aee4">Charge</string>
+    <string name="l10n_today_screen_effort_8c974bc6">Effort</string>
     <string name="l10n_today_screen_recovery_ea924f72">Recovery</string>
     <string name="l10n_today_screen_sync_chip_now_c9bc849a">now</string>
     <string name="l10n_today_screen_sync_chip_live_98aadb37">live</string>
