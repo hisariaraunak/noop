@@ -135,6 +135,7 @@ private enum class Destination(
 
     // Group: Activity
     Workouts("workouts", R.string.nav_workouts, Icons.Filled.FitnessCenter),
+    WorkoutDetail("workout_detail/{deviceId}/{startTs}", R.string.nav_workouts, Icons.Filled.FitnessCenter),
     Trends("trends", R.string.nav_trends, Icons.AutoMirrored.Filled.TrendingUp),
 
     // Group: Insight
@@ -348,6 +349,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        // The single Latest Workouts tile opens its full detail; "See all workouts" opens the
+                        // list (Today only ever shows the most recent workout now — the rest are one tap away).
+                        onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
+                        onSeeAllWorkouts = { nav.navigate(Destination.Workouts.route) },
                     )
                 }
                 composable(Destination.Live.route) {
@@ -375,7 +380,19 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Explore.route) { TrendsExploreScreen(viewModel) }
                 composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
                 composable(Destination.SmartAlarm.route) { SmartAlarmScreen(viewModel) }
-                composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }
+                composable(Destination.Workouts.route) {
+                    WorkoutsScreen(
+                        viewModel,
+                        onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
+                    )
+                }
+                composable(Destination.WorkoutDetail.route) { backStackEntry ->
+                    WorkoutDetailScreen(
+                        vm = viewModel,
+                        deviceId = backStackEntry.arguments?.getString("deviceId").orEmpty(),
+                        startTs = backStackEntry.arguments?.getString("startTs")?.toLongOrNull() ?: 0L,
+                    )
+                }
                 composable(Destination.Intelligence.route) { IntelligenceScreen(viewModel) }
 
                 // --- Placeholder routes (later waves fill these in) ---

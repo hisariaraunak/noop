@@ -248,6 +248,11 @@ object AnalyticsEngine {
         // the whole-night mean. Display-only preference threaded from the caller (UnitPrefs.hrvWindow). The
         // default (false) is byte-identical to the historical whole-night value.
         deepHrvWindow: Boolean = false,
+        // Workout auto-detection sensitivity tier (Settings → Workout Detection). Default
+        // [WorkoutDetector.Sensitivity.HIGH] (the original hardcoded thresholds) keeps every
+        // pure-function caller/test byte-identical; IntelligenceEngine threads the user's stored
+        // choice, default [WorkoutDetector.Sensitivity.MEDIUM] for the shipped app.
+        workoutSensitivity: WorkoutDetector.Sensitivity = WorkoutDetector.Sensitivity.HIGH,
     ): DayResult {
 
         // ── Sleep detection + staging ─────────────────────────────────────────
@@ -532,6 +537,7 @@ object AnalyticsEngine {
             maxHR = maxHROverride,
             age = if (profile.age > 0) profile.age else null,
             profile = profile,
+            sensitivity = workoutSensitivity,
         )
 
         // ── Steps (APPROXIMATE) ───────────────────────────────────────────────

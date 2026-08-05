@@ -276,6 +276,16 @@ class ProfileStore(private val prefs: SharedPreferences) {
         get() = prefs.getInt(KEY_STEPS_WALK_PLANNED, 0)
         set(v) = prefs.edit().putInt(KEY_STEPS_WALK_PLANNED, v).apply()
 
+    // ── Workout auto-detection sensitivity ──────────────────────────────────────────────────────
+    /** How easily the always-on detector (`WorkoutDetector`) qualifies a bout as a workout. Stored
+     *  as the [com.noop.analytics.WorkoutDetector.Sensitivity] ordinal; default MEDIUM (index 1) —
+     *  tighter than the detector's original always-on thresholds (HIGH), which ran too eagerly. */
+    var workoutSensitivity: com.noop.analytics.WorkoutDetector.Sensitivity
+        get() = com.noop.analytics.WorkoutDetector.Sensitivity.entries.getOrElse(
+            prefs.getInt(KEY_WORKOUT_SENSITIVITY, com.noop.analytics.WorkoutDetector.Sensitivity.MEDIUM.ordinal),
+        ) { com.noop.analytics.WorkoutDetector.Sensitivity.MEDIUM }
+        set(v) = prefs.edit().putInt(KEY_WORKOUT_SENSITIVITY, v.ordinal).apply()
+
     /** The auto (Tanaka) HR-max for the current age. */
     val hrMaxAuto: Int get() = Zones.hrMaxTanaka(age)
 
@@ -341,6 +351,7 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_STEPS_MANUAL_COEFF = "steps_manual_coefficient"
         private const val KEY_STEPS_WALK_START = "steps_walk_start_ts"
         private const val KEY_STEPS_WALK_PLANNED = "steps_walk_planned_count"
+        private const val KEY_WORKOUT_SENSITIVITY = "workout_detection_sensitivity"
 
         private const val AGE_MIN = 13
         private const val AGE_MAX = 100
@@ -566,6 +577,7 @@ fun SettingsScreen(
     var rhythmEnabled by remember { mutableStateOf(RhythmConsent.isEnabled(context)) }
     var coachSignals by remember { mutableStateOf(NoopPrefs.coachSignals(context)) }
     var autoDetectWorkouts by remember { mutableStateOf(NoopPrefs.autoDetectWorkouts(context)) }
+    var workoutSensitivity by remember { mutableStateOf(profile.workoutSensitivity) }
     var journalReminder by remember { mutableStateOf(NoopPrefs.journalReminderEnabled(context)) }
     // Keep the screen on during a manual workout recording (#703), default OFF. The live-workout
     // screen reads this same "workoutKeepScreenOn" key. String shared verbatim with the iOS/Mac twin
@@ -2335,6 +2347,37 @@ fun SettingsScreen(
                         workoutKeepScreenOn = it
                         NoopPrefs.of(context).edit().putBoolean("workoutKeepScreenOn", it).apply()
                     },
+                )
+                RowDivider()
+                // Workout auto-detection sensitivity: how easily the always-on background detector
+                // (WorkoutDetector, runs every sync — distinct from the opt-in "Auto-detect workouts"
+                // Today-card toggle above) qualifies a bout as a workout. Low = fewest false positives
+                // (needs a longer, more clearly elevated effort); High = the original, looser behaviour.
+                FormRow(label = "Workout detection sensitivity") {
+                    SegmentedPillControl(
+                        items = listOf(
+                            com.noop.analytics.WorkoutDetector.Sensitivity.LOW,
+                            com.noop.analytics.WorkoutDetector.Sensitivity.MEDIUM,
+                            com.noop.analytics.WorkoutDetector.Sensitivity.HIGH,
+                        ),
+                        selection = workoutSensitivity,
+                        label = {
+                            when (it) {
+                                com.noop.analytics.WorkoutDetector.Sensitivity.LOW -> "Low"
+                                com.noop.analytics.WorkoutDetector.Sensitivity.MEDIUM -> "Medium"
+                                com.noop.analytics.WorkoutDetector.Sensitivity.HIGH -> "High"
+                            }
+                        },
+                        onSelect = {
+                            workoutSensitivity = it
+                            profile.workoutSensitivity = it
+                        },
+                    )
+                }
+                Text(
+                    text = "How easily a sustained, elevated stretch of activity gets auto-detected as a workout. Lower is stricter and misses more borderline activity; higher catches more but risks the odd false positive. Applies on the next sync.",
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
                 )
                 RowDivider()
                 // BETA + default ON (the one exception to this section's off-by-default rule): the flag

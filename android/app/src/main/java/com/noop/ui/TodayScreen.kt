@@ -269,6 +269,10 @@ fun TodayScreen(
     // The #627 journal-reminder card links straight to the journal (Insights). Defaulted to a no-op so
     // the call site stays compiling; AppRoot binds it to nav.navigateTopLevel(Insights), same as Sleep.
     onOpenJournal: () -> Unit = {},
+    // Tapping the single Latest Workouts tile opens its full detail screen; "See all workouts" opens the
+    // Workouts list. Defaulted to no-ops so the call site stays compiling; AppRoot binds both to nav.navigate(...).
+    onOpenWorkout: (WorkoutRow) -> Unit = {},
+    onSeeAllWorkouts: () -> Unit = {},
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -1499,7 +1503,11 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            TodayWorkoutsSection(footer.recentWorkouts)
+                            TodayWorkoutsSection(
+                                footer.recentWorkouts,
+                                onOpenWorkout = onOpenWorkout,
+                                onSeeAllWorkouts = onSeeAllWorkouts,
+                            )
                         }
                         // HEART RATE, the live HR thread / trend card. #991: header + card in a Column.
                         TodaySection.HEART_RATE -> Column(
@@ -5380,28 +5388,39 @@ private fun WorkoutGlyph(icon: ImageVector, modifier: Modifier = Modifier) {
 // MARK: - Today footer sections
 
 @Composable
-private fun TodayWorkoutsSection(workouts: List<WorkoutRow>) {
-    // Single column, newest first: the 2x2 grid truncated durations on narrow phones and read as
-    // unrelated stat tiles rather than a chronological feed. Full-width tiles have room for the
-    // kcal chip, so the #332 compactDelta workaround is no longer needed here.
-    val feed = lastWorkoutsFeed(workouts)
-    if (feed.isEmpty()) return
+private fun TodayWorkoutsSection(
+    workouts: List<WorkoutRow>,
+    onOpenWorkout: (WorkoutRow) -> Unit = {},
+    onSeeAllWorkouts: () -> Unit = {},
+) {
+    // Today shows only the single most recent workout — the full history (incl. anything older) lives
+    // one tap away on the Workouts screen via "See all", so the dashboard stays a glance, not a log.
+    val latest = lastWorkoutsFeed(workouts).firstOrNull() ?: return
 
     // "Latest Workouts", not "Last": "Last" read as "final". Mirrored on iOS (TodayView). Lives in
     // strings.xml (values + values-de) so the header is localizable like the nav labels.
-    SectionHeader(stringResource(R.string.today_latest_workouts), overline = "Activity", trailing = "14 days")
+    SectionHeader(stringResource(R.string.today_latest_workouts), overline = "Activity")
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        feed.forEach { workout ->
-            StatTile(
-                modifier = Modifier.fillMaxWidth(),
-                label = WorkoutEditing.displaySport(workout.sport),
-                value = workoutDuration(workout),
-                caption = workoutCaption(workout),
-                accent = workout.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.textPrimary,
-                delta = workout.energyKcal?.let { "${it.roundToInt()} kcal" },
-                deltaColor = Palette.metricAmber,
-            )
-        }
+        StatTile(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenWorkout(latest) },
+            label = WorkoutEditing.displaySport(latest.sport),
+            value = workoutDuration(latest),
+            caption = workoutCaption(latest),
+            accent = latest.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.textPrimary,
+            delta = latest.energyKcal?.let { "${it.roundToInt()} kcal" },
+            deltaColor = Palette.metricAmber,
+        )
+        Text(
+            "See all workouts",
+            style = NoopType.footnote,
+            color = Palette.accent,
+            modifier = Modifier
+                .align(Alignment.End)
+                .clickable(onClick = onSeeAllWorkouts)
+                .padding(vertical = 4.dp),
+        )
     }
 }
 

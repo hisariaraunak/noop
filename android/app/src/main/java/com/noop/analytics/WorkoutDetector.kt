@@ -34,6 +34,9 @@ object WorkoutDetector {
 
     // ---- Constants (exercise.py) ----
 
+    /** == [Sensitivity.HIGH]; the always-on pipeline's historical (pre-toggle) thresholds, kept as the
+     *  DEFAULT [detect] reads so every pure-function caller/test stays byte-identical. The shipped app
+     *  instead threads the user's Settings → Workout Detection choice (default [Sensitivity.MEDIUM]). */
     const val minExerciseMin: Double = 5.0
     const val hrMarginBPM: Double = 15.0
     const val motionThreshold: Double = 0.20
@@ -55,6 +58,19 @@ object WorkoutDetector {
      * separate workouts is gated out by the HR check, not by this window.
      */
     const val bridgeGapS: Double = 300.0
+
+    /**
+     * User-facing sensitivity tier (Settings → Workout Detection): trades missed workouts against false
+     * positives on the always-on detector. [HIGH] reproduces the original hardcoded thresholds (loose —
+     * a short, mildly-elevated errand could qualify); [LOW] and [MEDIUM] raise the HR-elevation margin,
+     * the minimum sustained duration, and the zone-2+ intensity share so a false positive needs a
+     * materially harder bar to clear. [MEDIUM] is the shipped app default.
+     */
+    enum class Sensitivity(val hrMarginBPM: Double, val minExerciseMin: Double, val minIntensityZ2Plus: Double) {
+        LOW(hrMarginBPM = 25.0, minExerciseMin = 10.0, minIntensityZ2Plus = 0.60),
+        MEDIUM(hrMarginBPM = 20.0, minExerciseMin = 8.0, minIntensityZ2Plus = 0.55),
+        HIGH(hrMarginBPM = 15.0, minExerciseMin = 5.0, minIntensityZ2Plus = 0.50),
+    }
 
     // ---- Activity series (activity.py) ----
 
@@ -268,6 +284,10 @@ object WorkoutDetector {
      * @param maxHR HRmax (bpm). null → estimated via StrainScorer.estimateHRmax.
      * @param age used only for the Tanaka fallback when maxHR is null.
      * @param profile when provided, per-bout calories are estimated.
+     * @param sensitivity the elevation-margin / duration / intensity bar a candidate bout must clear.
+     *   Default [Sensitivity.HIGH] (== the original hardcoded thresholds) keeps every pure-function
+     *   caller/test byte-identical; the shipped app threads the user's Settings → Workout Detection
+     *   choice instead (default [Sensitivity.MEDIUM]).
      */
     fun detect(
         hr: List<HrSample>,
@@ -276,13 +296,14 @@ object WorkoutDetector {
         maxHR: Double? = null,
         age: Double? = null,
         profile: UserProfile? = null,
+        sensitivity: Sensitivity = Sensitivity.HIGH,
     ): List<ExerciseSession> {
         val hrSeg = cleanHR(hr)
         val motion = activitySeries(gravity)
         if (hrSeg.isEmpty() || motion.isEmpty()) return emptyList()
 
         val restHR = restingHR ?: deriveRestingHR(hrSeg)
-        val hrFloor = restHR + hrMarginBPM
+        val hrFloor = restHR + sensitivity.hrMarginBPM
 
         val effMaxHR: Double?
         val hrmaxSource: String
@@ -331,7 +352,7 @@ object WorkoutDetector {
         // gaps. Runs over a genuine rest (HR falls to resting) are NOT bridged.
         val runs = bridgeRuns(rawRuns, hrSeg, hrFloor)
 
-        val minDurS = minExerciseMin * 60.0
+        val minDurS = sensitivity.minExerciseMin * 60.0
         val sessions = ArrayList<ExerciseSession>()
         for ((idx, run) in runs.withIndex()) {
             val (start, end) = run
@@ -354,7 +375,7 @@ object WorkoutDetector {
             // Intensity qualification: require ≥ MIN_INTENSITY_Z2PLUS in zone 2+.
             if (zonePct.isNotEmpty()) {
                 val z2plus = (2..5).sumOf { zonePct[it] ?: 0.0 } / 100.0
-                if (z2plus < minIntensityZ2Plus) continue
+                if (z2plus < sensitivity.minIntensityZ2Plus) continue
             }
 
             // Qualified → back-date the start over the warm-up and report stats on the full window (#148).

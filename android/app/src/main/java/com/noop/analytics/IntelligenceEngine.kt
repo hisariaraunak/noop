@@ -238,6 +238,12 @@ object IntelligenceEngine {
         // would bias every estimate. These are used ONLY when the whole-day fit cannot run at all —
         // see [calPoints] below. Default empty so existing callers/tests are unaffected.
         bootstrapStepsCalibrationPoints: List<StepsEstimateEngine.CalibrationPoint> = emptyList(),
+        // Workout auto-detection sensitivity (Settings → Workout Detection). Context-fed the same way
+        // baselineEpoch/deepHrvWindow are — the Context-aware caller reads the stored preference and
+        // passes plain data down. Default [WorkoutDetector.Sensitivity.HIGH] (the original thresholds)
+        // keeps every pure-function caller/test byte-identical; the shipped app threads the user's
+        // choice, default [WorkoutDetector.Sensitivity.MEDIUM].
+        workoutSensitivity: WorkoutDetector.Sensitivity = WorkoutDetector.Sensitivity.HIGH,
     ): List<Computed> = withContext(Dispatchers.Default) {
         // Serialise the whole pass so overlapping callers never run two rescores in parallel (see
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
@@ -247,7 +253,7 @@ object IntelligenceEngine {
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow,
-                bootstrapStepsCalibrationPoints)
+                bootstrapStepsCalibrationPoints, workoutSensitivity)
             if (healed == 0) out
             // #899 heal re-pass: the pass above deleted overlapping duplicate sleep sessions AFTER its days
             // were scored, and the read-side dedup those days consumed had no bank-recency witness (the fresh
@@ -258,7 +264,7 @@ object IntelligenceEngine {
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow,
-                bootstrapStepsCalibrationPoints).first
+                bootstrapStepsCalibrationPoints, workoutSensitivity).first
         }
     }
 
@@ -352,6 +358,8 @@ object IntelligenceEngine {
         deepHrvWindow: Boolean = false,
         // See [analyzeRecent]'s doc — the BOOTSTRAP fallback, used only when the whole-day fit can't run.
         bootstrapStepsCalibrationPoints: List<StepsEstimateEngine.CalibrationPoint> = emptyList(),
+        // See [analyzeRecent]'s doc — threaded straight into each day's AnalyticsEngine.analyzeDay call.
+        workoutSensitivity: WorkoutDetector.Sensitivity = WorkoutDetector.Sensitivity.HIGH,
         // #899 heal re-pass: the second component of the return is how many overlapping duplicate sleep
         // sessions the heal below deleted this pass. The public wrapper re-runs ONCE when it is non-zero
         // so the affected days re-score against the cleaned store.
@@ -603,6 +611,9 @@ object IntelligenceEngine {
                 useSleepStagerV2 = useExperimentalSleepV2,
                 // #364 follow-up: same threading for the motion-aware wake refinement post-pass.
                 useMotionAwareWake = useMotionAwareWake,
+                // Workout auto-detection sensitivity (Settings → Workout Detection), threaded straight
+                // through to WorkoutDetector.detect.
+                workoutSensitivity = workoutSensitivity,
                 // Sleep & Rest test mode (Test Centre E5): thread the trace sink straight through. null (the
                 // default) keeps analyzeDay's byte-identical untraced path; when the caller passed a non-null
                 // sink (mode on), detectSleep's gate trace + the Rest sub-score line route to the .sleep-tagged

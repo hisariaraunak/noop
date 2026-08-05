@@ -931,6 +931,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         // see StepsCalibrationPointStore) — Context-fed the same way baselineEpoch is
                         // below. The engine uses them ONLY when the whole-day phone-vs-strap fit can't run.
                         bootstrapStepsCalibrationPoints = StepsCalibrationPointStore.load(appContext).toCalibrationPoints(),
+                        // Workout auto-detection sensitivity (Settings → Workout Detection).
+                        workoutSensitivity = profileStore.workoutSensitivity,
                         // Manual "Recalibrate baseline" anchor (Settings → Charge advanced). The analytics
                         // layer is Context-free, so read the epoch (whole seconds, written as a Long by the
                         // button) here and thread it down — foldHistory drops every HRV night before it.
@@ -1556,6 +1558,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     profileStore.stepsCalibrationManual = cal.manual
                 },
                 bootstrapStepsCalibrationPoints = StepsCalibrationPointStore.load(appContext).toCalibrationPoints(),
+                workoutSensitivity = profileStore.workoutSensitivity,
                 baselineEpoch = NoopPrefs.of(appContext)
                     .getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble(),
                 recoveryEpoch = NoopPrefs.of(appContext)

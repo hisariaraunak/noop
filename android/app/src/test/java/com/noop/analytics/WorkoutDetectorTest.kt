@@ -165,4 +165,44 @@ class WorkoutDetectorTest {
             sessions[1].start > sessions[0].end,
         )
     }
+
+    /** A brief-but-genuinely-vigorous 7-minute bout (HR clears every tier's elevation AND zone-2+
+     *  intensity gate) that the always-on detector's original, loose duration floor (Sensitivity.HIGH's
+     *  5 min, still the [WorkoutDetector.detect] default for byte-identical pure-function callers/tests)
+     *  qualifies as a workout, but the shipped app's tighter Sensitivity.MEDIUM default (8 min) — and the
+     *  stricter Sensitivity.LOW (10 min) — correctly reject as too short to be a real workout. Pins the
+     *  exact "detector too sensitive" complaint the Settings toggle fixes. */
+    @Test fun briefVigorousBout_onlyQualifiesUnderHighSensitivity() {
+        val restingHR = 52.0
+        val start = 14_000_000L
+        val dur = 7L * 60 // 7 min: clears HIGH's 5 min floor, misses MEDIUM's 8 min and LOW's 10 min
+        val hrList = ArrayList<HrSample>()
+        val gravList = ArrayList<GravitySample>()
+        val dayStart = start - 30 * 60
+        val dayEnd = start + dur + 30 * 60
+        var t = dayStart
+        while (t < dayEnd) {
+            val inBout = t >= start && t < start + dur
+            hrList.add(hr(t, if (inBout) 150 else restingHR.toInt()))
+            gravList.add(grav(t, if (inBout) (t.mod(2L)).toDouble() * 0.5 else 0.0))
+            t += 1
+        }
+        val high = WorkoutDetector.detect(
+            hr = hrList, gravity = gravList, restingHR = restingHR, age = 30.0,
+            sensitivity = WorkoutDetector.Sensitivity.HIGH,
+        )
+        assertEquals("HIGH's original 5 min floor still qualifies this 7 min bout", 1, high.size)
+
+        val medium = WorkoutDetector.detect(
+            hr = hrList, gravity = gravList, restingHR = restingHR, age = 30.0,
+            sensitivity = WorkoutDetector.Sensitivity.MEDIUM,
+        )
+        assertTrue("MEDIUM's 8 min floor rejects a 7 min bout", medium.isEmpty())
+
+        val low = WorkoutDetector.detect(
+            hr = hrList, gravity = gravList, restingHR = restingHR, age = 30.0,
+            sensitivity = WorkoutDetector.Sensitivity.LOW,
+        )
+        assertTrue("LOW's 10 min floor rejects a 7 min bout", low.isEmpty())
+    }
 }
