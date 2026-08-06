@@ -2271,12 +2271,13 @@ private fun ScoreHeroRow(
     effortScale: EffortScale,
     liveTodayStrain: Double? = null,
     // Opens a score's own detail trend (vital_detail/<key>) — the SAME destination its Key Metrics tile
-    // uses, so "tap the thing, see its history" holds wherever the score appears. Each ring is wired to
-    // it below; the label chevron underneath keeps opening the what-does-this-mean explainer.
+    // uses, so "tap the thing, see its history" holds wherever the score appears. Each ring's label is
+    // wired to it below (the ring itself only splashes — see HeroRingColumn).
     onOpenMetric: (String) -> Unit = {},
-    onScoreInfo: (ScoreSection) -> Unit,
-    // A1 (#514/#706): tapping the Charge ring opens the breakdown sheet. A small chevron cue overlays the
-    // ring's bottom edge INSIDE the ring frame, so it adds no stacked height (the #762 self-sizing parity).
+    // One shared "How your scores work" entry point for the whole card (not per-ring, since it's one
+    // explainer covering all three) — called with null, which opens the guide at the top with no section
+    // pre-selected (the same nullable type `openGuide` already is; see TodayScreen's openGuide/guideSection).
+    onScoreInfo: (ScoreSection?) -> Unit,
 ) {
     val recovery = day?.recovery
     // Prefer the live in-progress Effort for today, but never BELOW the day's already-earned strain
@@ -2323,7 +2324,6 @@ private fun ScoreHeroRow(
                 // empty / calibrating overlay; badges its recovery winner.
                 HeroRingColumn(
                     domain = DomainTheme.Charge,
-                    onInfo = { onScoreInfo(ScoreSection.CHARGE) },
                     onRingTap = { onOpenMetric("recovery") },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -2362,7 +2362,6 @@ private fun ScoreHeroRow(
                 // EFFORT, strain on the gauge, on the user's selected scale, as a liquid vessel.
                 HeroRingColumn(
                     domain = DomainTheme.Effort,
-                    onInfo = { onScoreInfo(ScoreSection.EFFORT) },
                     onRingTap = { onOpenMetric("strain") },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -2383,7 +2382,6 @@ private fun ScoreHeroRow(
                 Box(modifier = Modifier.width(ring)) {
                     HeroRingColumn(
                         domain = DomainTheme.Rest,
-                        onInfo = { onScoreInfo(ScoreSection.REST) },
                         onRingTap = { onOpenMetric("rest") },
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -2412,20 +2410,39 @@ private fun ScoreHeroRow(
                 }
             }
         }
+        // One shared "How your scores work" entry point for the whole hero card (not one per ring — the
+        // explainer covers Charge/Effort/Rest together). Corner overlay so it adds no stacked height.
+        // section = null opens the guide at the top with nothing pre-selected, same as the first-run card.
+        IconButton(
+            onClick = { onScoreInfo(null) },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(Metrics.iconButton),
+        ) {
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = "How your scores work",
+                tint = Palette.textTertiary,
+                modifier = Modifier.size(Metrics.iconSmall),
+            )
+        }
     }
 }
 
 /**
- * One hero ring column: the ring, with a tappable UPPERCASE domain label + chevron beneath it (the
- * WHOOP affordance) that opens the matching scoring-guide section. Provenance belongs to the whole hero
- * card and is rendered once by [ScoreHeroRow], so this column only owns score content and navigation.
+ * One hero ring column: the ring (a [LiquidVessel]'s own splash+haptic on tap, nothing else — its own
+ * `clickable` consumes the gesture before any outer wrapper sees it, so an outer tap handler on the ring
+ * never actually fires), with a tappable UPPERCASE domain label + chevron beneath it that reliably opens
+ * that score's detail trend. Provenance belongs to the whole hero card and is rendered once by
+ * [ScoreHeroRow], so this column only owns score content and navigation.
  */
 @Composable
 private fun HeroRingColumn(
     domain: DomainTheme,
-    onInfo: () -> Unit,
-    // A1: when non-null (Charge), the ring is tappable and opens the breakdown sheet. The chevron cue is
-    // overlaid by the caller INSIDE the ring box so it adds no stacked height (#762 self-sizing parity).
+    // Opens this score's detail trend (vital_detail/<key>). Also used as the label row's tap target — the
+    // ring itself used to carry a duplicate clickable wrapper, but LiquidVessel's own internal clickable
+    // (splash + haptic) always consumes the tap first, so that wrapper never fired; removed rather than
+    // leaving a dead, misleading (TalkBack still announced an action) handler on the ring.
     onRingTap: (() -> Unit)? = null,
     ring: @Composable () -> Unit,
 ) {
@@ -2433,28 +2450,11 @@ private fun HeroRingColumn(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (onRingTap != null) {
-            // liquidPress on the tappable Charge vessel so it settles inward on press (the vessel itself
-            // also splashes via LiquidVessel's own tap). Same interactionSource on the clickable + press.
-            val ringInteraction = remember { MutableInteractionSource() }
-            Box(
-                modifier = Modifier
-                    .liquidPress(ringInteraction)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = ringInteraction,
-                        indication = null,
-                        onClickLabel = "See what shaped your ${domain.label}",
-                        onClick = onRingTap,
-                    ),
-            ) { ring() }
-        } else {
-            ring()
-        }
+        ring()
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
-                .clickable { onInfo() }
+                .clickable(onClickLabel = "See what shaped your ${domain.label}") { onRingTap?.invoke() }
                 .padding(horizontal = 6.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -2478,9 +2478,11 @@ private fun HeroRingColumn(
             // One UI defaults) "REST" could wrap, growing the whole hero card. One line, ellipsis if forced.
             Text(domain.label.uppercase(), style = NoopType.overline, color = Palette.textSecondary,
                  maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Decorative now: the Row's own onClickLabel above already carries the accessible action
+            // description, so this icon no longer needs its own (avoids a redundant double-announcement).
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = uiString(R.string.l10n_today_screen_how_domain_label_is_calculated_8897768c, domain.label),
+                contentDescription = null,
                 tint = Palette.textSecondary.copy(alpha = 0.6f),
                 modifier = Modifier.size(14.dp),
             )
