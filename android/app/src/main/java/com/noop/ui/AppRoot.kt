@@ -424,6 +424,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     VitalDetailScreen(
                         vm = viewModel,
                         key = backStackEntry.arguments?.getString("key").orEmpty(),
+                        // Recovery's inline vitals accordion (Charge hub, 2026-08) still opens each vital's
+                        // own full page from its expanded panel — same destination, same as VitalSignsScreen's
+                        // onVitalClick above.
+                        onOpenVital = { k -> nav.navigate("vital_detail/$k") },
                     )
                 }
                 // --- v5 pillar screens (Wave 3 wiring) ---
