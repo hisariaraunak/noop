@@ -635,55 +635,26 @@ private fun HeroChartCard(
             }
 
             if (windowed.size >= 2) {
-                // Chart flanked by a max/avg/min Y-axis column and a first/mid/last date X-axis row,
-                // so the line reads against real numbers and dates rather than a bare curve. The
-                // Y-labels reuse the metric's own formatter but drop the unit suffix to keep the
-                // narrow left gutter compact.
+                // TrendCurveChart draws its own max/mid/min gridlines and first/mid/last date ticks, so
+                // the line reads against real numbers and dates without a separate axis column/row.
+                // fmtY reuses the metric's own formatter but drops the unit suffix to keep the chart's
+                // internal gridline labels compact.
                 val values = windowed.map { it.value }
-                val maxV = values.max()
-                val avgV = values.average()
-                val minV = values.min()
                 val fmtY: (Double) -> String = { v -> metric.format(v).substringBefore(' ').take(7) }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.height(IntrinsicSize.Min),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier.height(Metrics.chartHeight),
-                            verticalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(fmtY(maxV), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                            Text(fmtY(avgV), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                            Text(fmtY(minV), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                        }
-                        // The shared LineChart with a glowing "now" end-cap on its latest sample ,
-                        // the Bevel idiom from Today's OverviewHRChart.
-                        Box(modifier = Modifier.weight(1f).height(Metrics.chartHeight)) {
-                            LineChart(
-                                values = values,
-                                modifier = Modifier.fillMaxSize(),
-                                color = metric.accent,
-                                fill = true,
-                                selectionEnabled = true,
-                                selectionLabels = windowed.map { prettyExploreDate(it.day) },
-                            )
-                            ExploreGlowEndCap(values = values, tipColor = metric.accent)
-                        }
-                    }
-                    val days = windowed.map { it.day }
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        listOf(days.first(), days.getOrNull(days.lastIndex / 2), days.last()).forEach { d ->
-                            Text(
-                                prettyExploreDate(d),
-                                style = NoopType.footnote,
-                                color = Palette.textTertiary,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    // TrendCurveChart (2026-08) draws its own min/mid/max gridline labels AND its own
+                    // first/mid/last date ticks internally, so the external left-side Max/Avg/Min column,
+                    // the ExploreGlowEndCap latest-sample glow, and the below-chart date row this used to
+                    // need (LineChart had none of that built in) are all retired here — the chart is now
+                    // self-contained.
+                    TrendCurveChart(
+                        values = values,
+                        modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight),
+                        color = metric.accent,
+                        dayLabels = windowed.map { it.day },
+                        selectionEnabled = true,
+                        formatValue = fmtY,
+                    )
                 }
             } else {
                 Box(
@@ -714,13 +685,6 @@ private fun HeroChartCard(
     }
 }
 
-/** ISO "yyyy-MM-dd" to the same compact date used by both the axis and selection label. */
-private fun prettyExploreDate(day: String?): String =
-    day?.let {
-        runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM", Locale.US)) }
-            .getOrDefault(it)
-    }.orEmpty()
-
 @Composable
 private fun ChartFootItem(label: String, value: String) {
     Column {
@@ -735,31 +699,6 @@ private fun domainTint(category: String): Color = when (category) {
     uiString(R.string.explore_category_effort) -> Palette.effortColor
     uiString(R.string.explore_category_rest) -> Palette.restColor
     else -> Palette.accent
-}
-
-/**
- * A glowing "now" end-cap on a LineChart's latest sample (soft halo + bright core + white centre),
- * matching Today's OverviewHRChart. Reproduces LineChart's own point geometry so the dot sits on the
- * curve's final point. Drawn as a sibling overlay , the shared LineChart stays untouched.
- */
-@Composable
-private fun ExploreGlowEndCap(values: List<Double>, tipColor: Color) {
-    val clean = remember(values) { values.filter { it.isFinite() } }
-    if (clean.size < 2) return
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val strokePx = 2.5f
-        val topPad = strokePx + 4f
-        val bottomPad = strokePx + 4f
-        val minV = clean.min()
-        val maxV = clean.max()
-        val span = (maxV - minV).takeIf { it > 0.0 } ?: 1.0
-        val usableH = (size.height - topPad - bottomPad).coerceAtLeast(1f)
-        val norm = ((clean.last() - minV) / span).toFloat().coerceIn(0f, 1f)
-        val center = Offset(size.width, topPad + (1f - norm) * usableH)
-        drawCircle(color = tipColor.copy(alpha = 0.30f), radius = 9f, center = center)
-        drawCircle(color = tipColor.copy(alpha = 0.65f), radius = 5.5f, center = center)
-        drawCircle(color = Palette.tipCore, radius = 2.4f, center = center)
-    }
 }
 
 // MARK: - Stat tile row

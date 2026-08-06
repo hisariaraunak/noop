@@ -990,12 +990,14 @@ private fun StressTrendSection(model: StressModel, modifier: Modifier = Modifier
                             color = Palette.textSecondary,
                         )
                     }
-                    LineChart(
+                    // No day-string data at this call site (model.windowedTrend returns plain Doubles) —
+                    // dayLabels stays null, so the chart shows gridlines/dots/curve but no date ticks.
+                    TrendCurveChart(
                         values = points,
                         modifier = Modifier.height(Metrics.chartHeight),
                         color = StressRamp.STEADY,
-                        fill = true,
                         selectionEnabled = true,
+                        formatValue = { String.format(Locale.US, "%.1f", it) },
                     )
                     HorizontalDivider(color = Palette.hairline)
                     Row(modifier = Modifier.fillMaxWidth()) {

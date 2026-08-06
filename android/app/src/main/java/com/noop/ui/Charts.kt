@@ -722,9 +722,14 @@ fun DailyColumnChart(
                             drawLine(
                                 color = barColor,
                                 start = Offset(cx, floorY),
-                                end = Offset(cx, (top + cap).coerceAtMost(floorY)),
+                                // Flat cap, not Round: a Round-capped line overshoots each end by half the
+                                // stroke width, so the bar's "top" drifted below where the average line and
+                                // any future gridline actually sit. Butt ends exactly at `top` -- no
+                                // compensation needed (Round's version added `cap` here to counter the
+                                // overshoot; that's gone too).
+                                end = Offset(cx, top),
                                 strokeWidth = barWidth,
-                                cap = StrokeCap.Round,
+                                cap = StrokeCap.Butt,
                             )
                         }
                         // 2) THE FIX: the average line draws after the bars, on top of them.
@@ -956,7 +961,6 @@ fun BarChart(
                     val usableH = (h - topPad).coerceAtLeast(1f)
                     val slot = w / clean.size
                     val barWidth = (slot * 0.64f).coerceAtLeast(1f)
-                    val capRadius = (barWidth / 2f)
                     // Precompute each bar's x centre + top y once.
                     data class BarSeg(val cx: Float, val top: Float)
                     val bars = ArrayList<BarSeg>(clean.size)
@@ -973,9 +977,13 @@ fun BarChart(
                             drawLine(
                                 color = if (selectionEnabled && i == selectedIndex) color else unselectedColor,
                                 start = Offset(seg.cx, h),
-                                end = Offset(seg.cx, (seg.top + capRadius).coerceAtMost(h)),
+                                // Flat cap, not Round: a Round-capped line overshoots each end by half the
+                                // stroke width, so a bar's drawn top sat below its true value -- most visible
+                                // wherever a bar meets a straight reference edge. Butt ends exactly at `seg.top`,
+                                // no `capRadius` compensation needed (that offset is gone too).
+                                end = Offset(seg.cx, seg.top),
                                 strokeWidth = barWidth,
-                                cap = StrokeCap.Round,
+                                cap = StrokeCap.Butt,
                             )
                         }
                         if (selectionEnabled && selectedIndex in clean.indices) {

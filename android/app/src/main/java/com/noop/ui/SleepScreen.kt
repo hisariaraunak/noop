@@ -3182,28 +3182,18 @@ private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
                 label = { it.label },
                 onSelect = { range = it },
             )
-            Row(
-                modifier = Modifier.height(IntrinsicSize.Min),
-                horizontalArrangement = Arrangement.spacedBy(Metrics.space4),
-            ) {
-                Column(
-                    modifier = Modifier.height(Metrics.chartHeight),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(uiString(R.string.l10n_sleep_screen_spec_format_maxv_spec_unit_65091104, spec.format(maxV), spec.unit).trim(), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                    Text(uiString(R.string.l10n_sleep_screen_spec_format_avgv_spec_unit_46bf7fdc, spec.format(avgV), spec.unit).trim(), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                    Text(uiString(R.string.l10n_sleep_screen_spec_format_minv_spec_unit_e69978f4, spec.format(minV), spec.unit).trim(), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
-                }
-                LineChart(
-                    values = values,
-                    modifier = Modifier.weight(1f).height(Metrics.chartHeight)
-                        .semantics { contentDescription = uiString(R.string.l10n_sleep_screen_spec_title_trend_chart_3085ac6e, spec.title) },
-                    color = spec.color,
-                    fill = true,
-                    selectionEnabled = true,
-                    selectionLabels = filteredPoints.map { shortDayLabel(it.first) },   // #691: hover shows date + value
-                )
-            }
+            // TrendCurveChart draws its own min/mid/max gridline labels on its leading edge (2026-08), so
+            // the standalone Max/Avg/Min column this Row used to carry beside LineChart (which had none)
+            // is gone — it would have doubled up with the chart's own labels. The full Min/Avg/Max row
+            // below (unchanged) still gives the precise, clearly-labelled summary.
+            TrendCurveChart(
+                values = values,
+                modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight),
+                color = spec.color,
+                dayLabels = filteredPoints.map { it.first },
+                selectionEnabled = true,
+                formatValue = { "${spec.format(it)} ${spec.unit}".trim() },
+            )
             Row(modifier = Modifier.fillMaxWidth()) {
                 listOf(dates.first(), dates.getOrNull(dates.lastIndex / 2), dates.last()).forEach { d ->
                     Text(

@@ -789,14 +789,12 @@ private fun ChartWithAxes(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // The shared LineChart with a glowing "now" end-cap drawn on top , the Bevel idiom from
-            // Today's OverviewHRChart. The cap reproduces LineChart's own point geometry (same
-            // strokePx/topPad/bottomPad) so the dot lands exactly on the line's final sample.
+            // TrendCurveChart (2026-08) marks every sample including the latest with its own dot, so no
+            // separate glow-end-cap overlay is needed here anymore (see the removed GlowEndCap).
             //
             // headroom leaves the top fraction of the card empty and pins the plotting Box to the
-            // bottom , the Android stand-in for the iOS hero's `valueRange: 0...106` (LineChart has
-            // no value-domain hook, so we shrink its drawing box instead). Both LineChart and the
-            // GlowEndCap fill this same Box, so the cap stays on the line.
+            // bottom , the Android stand-in for the iOS hero's `valueRange: 0...106` (the chart has no
+            // value-domain hook, so we shrink its drawing box instead).
             val plotHeight = Metrics.chartHeight * (1f - headroom.coerceIn(0f, 0.5f))
             Box(
                 modifier = Modifier
@@ -817,18 +815,20 @@ private fun ChartWithAxes(
                             selectionEnabled = false,
                         )
                     } else {
-                        LineChart(
+                        // GlowEndCap retired here (2026-08): it independently recomputed LineChart's exact
+                        // point geometry to glow the latest sample, which TrendCurveChart already does for
+                        // every point (including the last) via its own dots -- a second overlay would risk
+                        // landing off the new chart's slightly different padding, and duplicate the glow.
+                        TrendCurveChart(
                             values = values,
                             modifier = Modifier.fillMaxSize(),
                             color = color,
-                            fill = true,
+                            dayLabels = dates,
                             selectionEnabled = true,
                             // #463: the pinpoint label goes through the SAME formatter as the axis column,
                             // so a tapped Effort day can't print the stored 0-100 value beside a 0-21 axis.
                             formatValue = formatY,
-                            selectionLabels = dates.map(::prettyAxisDate),
                         )
-                        GlowEndCap(values = values, tipColor = tipColor)
                     }
                 }
             }
@@ -996,34 +996,6 @@ private fun RecoveryHistoryCard(days: List<DailyMetric>, range: TrendsRange) {
 }
 
 // MARK: - Shared bits
-
-/**
- * A glowing dot pinned to a LineChart's latest sample , the Bevel "now" end-cap (a soft halo + bright
- * core + white centre), matching Today's OverviewHRChart. Drawn as a sibling overlay so the shared
- * LineChart stays untouched; it reproduces that chart's point geometry exactly (strokePx 2.5, top/
- * bottom pad strokePx+4, finite-value min/max) so the cap sits on the curve's final point.
- */
-@Composable
-private fun GlowEndCap(values: List<Double>, tipColor: Color) {
-    val clean = remember(values) { values.filter { it.isFinite() } }
-    if (clean.size < 2) return
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val strokePx = 2.5f
-        val topPad = strokePx + 4f
-        val bottomPad = strokePx + 4f
-        val minV = clean.min()
-        val maxV = clean.max()
-        val span = (maxV - minV).takeIf { it > 0.0 } ?: 1.0
-        val usableH = (size.height - topPad - bottomPad).coerceAtLeast(1f)
-        val x = size.width  // the latest point sits at the right edge
-        val norm = ((clean.last() - minV) / span).toFloat().coerceIn(0f, 1f)
-        val y = topPad + (1f - norm) * usableH
-        val center = Offset(x, y)
-        drawCircle(color = tipColor.copy(alpha = 0.30f), radius = 9f, center = center)
-        drawCircle(color = tipColor.copy(alpha = 0.65f), radius = 5.5f, center = center)
-        drawCircle(color = Palette.tipCore, radius = 2.4f, center = center)
-    }
-}
 
 /** Inset well shown when a window has too few points to plot, mirroring sparsePlaceholder. */
 @Composable

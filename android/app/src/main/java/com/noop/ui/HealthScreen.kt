@@ -1879,12 +1879,18 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
                         )
                     }
                 } else {
-                    LineChart(
+                    // Every other vital_detail key (strain, fitness_age, vitality, steps_est, active_kcal)
+                    // gets the same TrendCurveChart style as the six recovery keys (2026-08: every line
+                    // chart in the app moves to this style) — none of these are the "deviation, not
+                    // trend" shape DailyColumnChart is for, so curve is the uniform default here.
+                    val dayLabels = filteredPoints.map { it.first }
+                    TrendCurveChart(
                         values = values,
                         modifier = Modifier.height(Metrics.chartHeight),
                         color = detail.color,
-                        fill = true,
+                        dayLabels = dayLabels,
                         selectionEnabled = true, // the Vital Signs detail chart is meant to be tappable
+                        formatValue = { "${detail.format(it)} ${detail.unit}".trim() },
                     )
                 }
                 Box(
