@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
@@ -84,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.lifecycle.Lifecycle
@@ -113,6 +117,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
@@ -1662,6 +1667,10 @@ private val SERIES_BACKED_VITAL_KEYS = setOf("fitness_age", "vitality", "steps_e
 /** The six Charge-page recovery vitals (2026-08 chart redesign) — see [recoveryChartStyleFor]. */
 private val RECOVERY_CHART_KEYS = setOf("recovery", "hrv", "rhr", "resp", "spo2", "skin")
 
+/** A shorter range picker (1W/1M/3M) for the six recovery-chart keys only — every other vital_detail
+ *  key keeps the full [VitalDetailRange.entries] (W/2W/3W/M/3M/6M/1Y/ALL) unchanged. */
+private val RECOVERY_VITAL_RANGES = listOf(VitalDetailRange.WEEK, VitalDetailRange.MONTH, VitalDetailRange.THREE_MONTH)
+
 @Composable
 fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Unit = {}) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
@@ -1827,15 +1836,16 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
                         )
                     }
                 }
+                val shownRanges = if (key in RECOVERY_CHART_KEYS) RECOVERY_VITAL_RANGES else VitalDetailRange.entries
                 SegmentedPillControl(
-                    items = VitalDetailRange.entries,
+                    items = shownRanges,
                     selection = effectiveRange,
                     label = { it.label },
                     onSelect = { range = it },
                     adaptsToAvailableWidth = true,
                     enabled = { it in unlockedRanges },
                 )
-                if (unlockedRanges.size < VitalDetailRange.entries.size) {
+                if (!shownRanges.all { it in unlockedRanges }) {
                     Text(
                         uiString(R.string.l10n_health_screen_longer_ranges_unlock_as_more_history_d7da5fee),
                         style = NoopType.footnote,
@@ -1901,10 +1911,10 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
 
         // The Charge screen is the "reimagined" home for the recovery vitals (2026-08, mirrors the Effort
         // pattern): HRV/resting HR/respiration/SpO2/skin temp, each its own vital_detail page today with no
-        // shared home, get an inline accordion here instead — tap a row to see its trend without leaving
-        // Charge; the arrow at the bottom of an expanded row still opens that vital's own full page.
+        // shared home, get a Key-Metrics-style tile grid here instead — no inline expansion, tapping a tile
+        // opens that vital's own full page directly.
         if (key == "recovery") {
-            RecoveryVitalsAccordion(days = days, tempUnit = tempUnit, onOpenVital = onOpenVital)
+            RecoveryVitalsGrid(days = days, tempUnit = tempUnit, onOpenVital = onOpenVital)
         }
 
         // Per-reading breakdown so the provenance behind the trend is visible — whether each reading came
@@ -1915,7 +1925,26 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
         val readingRows = remember(filteredReadings, detail, strapId) {
             vitalReadingRows(filteredReadings, detail.unit, strapId, detail.format)
         }
-        VitalReadingsTable(rows = readingRows)
+        // The six recovery-chart keys collapse the table behind a "Show readings" link by default (2026-08
+        // declutter pass) — every other vital_detail key keeps it always-visible, unchanged.
+        if (key in RECOVERY_CHART_KEYS) {
+            var showReadings by remember { mutableStateOf(false) }
+            if (showReadings) VitalReadingsTable(rows = readingRows)
+            Text(
+                if (showReadings) "Hide readings" else "Show readings ›",
+                style = NoopType.footnote,
+                color = Palette.accent,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClickLabel = if (showReadings) "Hide readings" else "Show readings") {
+                        showReadings = !showReadings
+                    }
+                    .padding(vertical = Metrics.space8),
+            )
+        } else {
+            VitalReadingsTable(rows = readingRows)
+        }
 
         // The Effort screen is the "reimagined" home for heart-rate detail (2026-08): today's intraday HR
         // chart moved here off Today's compact HeartRateSummaryRow tap-through, plus a new time-in-zones
@@ -1941,7 +1970,7 @@ private val RECOVERY_VITAL_STYLE = mapOf(
     "skin" to RecoveryVitalStyle(Icons.Filled.Thermostat, Palette.metricAmber),
 )
 
-/** One filterable row in the Charge screen's Recovery Vitals accordion. [key] is the stable persisted
+/** One filterable tile in the Charge screen's Recovery Vitals grid. [key] is the stable persisted
  *  identifier (matches the `vital_detail/<key>` route + [RECOVERY_VITAL_STYLE]'s map key). */
 private enum class RecoveryVital(val key: String, val title: String) {
     HRV("hrv", "Heart-rate variability"),
@@ -1973,14 +2002,13 @@ private object RecoveryVitalsPrefs {
     }
 }
 
-/** The Charge screen's "Recovery vitals" accordion (2026-08, mirrors the Effort pattern): HRV, resting HR,
- *  respiration, blood oxygen and skin temperature — the exact five inputs the scoring guide already
- *  describes as Charge's own — each its own orphaned `vital_detail/<key>` page today. One row expands at
- *  a time to a compact trend (reusing the SAME range-gating helpers + LineChart the main card above uses,
- *  just scoped to that row); the arrow at the foot of an expanded row still opens that vital's own full
- *  page (readings table, provenance) via [onOpenVital]. */
+/** The Charge screen's "Recovery vitals" grid (2026-08 tile redesign, replaces the earlier inline
+ *  accordion): HRV, resting HR, respiration, blood oxygen and skin temperature — the exact five inputs
+ *  the scoring guide already describes as Charge's own — as a 2-column grid of [RecoveryVitalTile]s
+ *  matching Today's Key Metrics tile style. No inline expansion: the whole tile is one tap target that
+ *  opens the vital's own full page via [onOpenVital]. */
 @Composable
-private fun RecoveryVitalsAccordion(days: List<DailyMetric>, tempUnit: TemperatureUnit, onOpenVital: (String) -> Unit) {
+private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUnit, onOpenVital: (String) -> Unit) {
     val models = remember(days, tempUnit) {
         listOf("hrv", "rhr", "resp", "spo2", "skin").mapNotNull { key ->
             buildVitalDetail(days, key, tempUnit)?.let { key to it }
@@ -1994,7 +2022,6 @@ private fun RecoveryVitalsAccordion(days: List<DailyMetric>, tempUnit: Temperatu
     var hiddenVitals by remember { mutableStateOf(RecoveryVitalsPrefs.hidden(context)) }
     val hiddenKeys = remember(hiddenVitals) { hiddenVitals.mapTo(HashSet()) { it.key } }
     val visibleModels = remember(models, hiddenKeys) { models.filterNot { it.first in hiddenKeys } }
-    var expandedKey by remember { mutableStateOf<String?>(null) }
     var showEditor by remember { mutableStateOf(false) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2015,27 +2042,34 @@ private fun RecoveryVitalsAccordion(days: List<DailyMetric>, tempUnit: Temperatu
             )
         }
     } else {
-        NoopCard(padding = Metrics.space8) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                visibleModels.forEachIndexed { index, (key, model) ->
-                    val style = RECOVERY_VITAL_STYLE.getValue(key)
-                    RecoveryVitalRow(
-                        vitalKey = key,
-                        label = model.title,
-                        style = style,
-                        model = model,
-                        expanded = expandedKey == key,
-                        onToggle = { expandedKey = if (expandedKey == key) null else key },
-                        onOpenFull = { onOpenVital(key) },
-                    )
-                    if (index < visibleModels.size - 1) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(Metrics.divider)
-                                .background(Palette.hairline),
-                        )
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+            visibleModels.chunked(2).forEach { pair ->
+                if (pair.size == 2) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    ) {
+                        pair.forEach { (key, model) ->
+                            RecoveryVitalTile(
+                                label = model.title,
+                                style = RECOVERY_VITAL_STYLE.getValue(key),
+                                model = model,
+                                onOpenFull = { onOpenVital(key) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
+                } else {
+                    // Odd tile out (5 items -> a lone last row): spans the full width rather than
+                    // stretching to double size or leaving a dead half-row, matching the mockup.
+                    val (key, model) = pair.first()
+                    RecoveryVitalTile(
+                        label = model.title,
+                        style = RECOVERY_VITAL_STYLE.getValue(key),
+                        model = model,
+                        onOpenFull = { onOpenVital(key) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -2054,10 +2088,10 @@ private fun RecoveryVitalsAccordion(days: List<DailyMetric>, tempUnit: Temperatu
     }
 }
 
-/** Show/hide editor for the Recovery Vitals accordion, reusing the SAME [EditableVisibilityRows] shell
+/** Show/hide editor for the Recovery Vitals grid, reusing the SAME [EditableVisibilityRows] shell
  *  that already powers the Key Metrics and Your Cards customization dialogs — same reorder/hide/restore
  *  affordances, same "at least one must stay shown" rule ([Button]'s `enabled = shown.isNotEmpty()`).
- *  Reordering is along for the ride (the shared component doesn't have a hide-only mode); the accordion
+ *  Reordering is along for the ride (the shared component doesn't have a hide-only mode); the grid
  *  itself still renders in [RecoveryVital.defaultOrder], so a reorder here has no effect yet. */
 @Composable
 private fun RecoveryVitalsEditorDialog(
@@ -2115,142 +2149,119 @@ private fun RecoveryVitalsEditorDialog(
     }
 }
 
+/** One Recovery Vitals tile ("Key Metrics" style, 2026-08): a bordered card, icon + uppercase label with
+ *  a trend-direction arrow (today vs the trailing week's average), the value, a "7-day avg" caption, and
+ *  a slim [LiquidTube] fill bar — the SAME visual language as Today's Key Metrics grid (`LiquidKeyTile`),
+ *  fed a recovery vital instead of a dashboard metric. The delta arrow is deliberately NEUTRAL-tinted, no
+ *  green/red good-bad coding — confirmed with the user: a rising HRV isn't unambiguously good and a
+ *  falling resting HR isn't either, unlike Steps or Calories. No inline expansion: the whole tile is one
+ *  tap target opening the vital's own full page via [onOpenFull]. */
 @Composable
-private fun RecoveryVitalRow(
-    vitalKey: String,
+private fun RecoveryVitalTile(
     label: String,
     style: RecoveryVitalStyle,
     model: VitalDetailModel,
-    expanded: Boolean,
-    onToggle: () -> Unit,
     onOpenFull: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val latest = model.points.lastOrNull()
-    // The clickable toggle lives on the HEADER row only — not the outer column — so once expanded, taps
-    // on the range pills / chart / "open full" button below (each their own clickable/pointerInput) never
-    // fight a wrapping clickable for the gesture, and tapping whitespace inside the expanded panel doesn't
-    // surprise-collapse it.
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (expanded) style.tint.copy(alpha = 0.08f) else Color.Transparent)
-                .clickable(onClickLabel = "See $label's trend") { onToggle() }
-                .padding(Metrics.space10),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .border(1.5.dp, style.tint, RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(style.icon, contentDescription = null, tint = style.tint, modifier = Modifier.size(16.dp))
-            }
-            Text(
-                label,
-                style = NoopType.subhead,
-                fontWeight = if (expanded) FontWeight.Medium else FontWeight.Normal,
-                color = if (expanded) Palette.textPrimary else Palette.textSecondary,
-                modifier = Modifier.weight(1f),
+    val recent = remember(model) { model.points.takeLast(8) }
+    val today = recent.lastOrNull()?.second
+    val priorAvg = recent.dropLast(1).map { it.second }.takeIf { it.isNotEmpty() }?.average()
+    val deltaPct = if (today != null && priorAvg != null && priorAvg != 0.0) {
+        (today - priorAvg) / priorAvg * 100.0
+    } else {
+        null
+    }
+    val interaction = remember { MutableInteractionSource() }
+
+    Column(
+        modifier = modifier
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "See $label's history",
+                onClick = onOpenFull,
             )
-            if (latest != null) {
+            .padding(horizontal = 13.dp, vertical = 12.dp)
+            .semantics { contentDescription = "$label, ${today?.let { model.format(it) } ?: "No data"} ${model.unit}".trim() },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(style.icon, contentDescription = null, tint = style.tint, modifier = Modifier.size(13.dp))
                 Text(
-                    "${model.format(latest.second)} ${model.unit}".trim(),
-                    style = NoopType.number(15f, weight = FontWeight.Medium),
-                    color = Palette.textPrimary,
+                    label.uppercase(),
+                    style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
+                    color = Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(
-                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = if (expanded) style.tint else Palette.textTertiary,
-                modifier = Modifier.size(15.dp),
+            if (deltaPct != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Icon(
+                        when {
+                            abs(deltaPct) < 0.5 -> Icons.AutoMirrored.Filled.TrendingFlat
+                            deltaPct > 0 -> Icons.AutoMirrored.Filled.TrendingUp
+                            else -> Icons.AutoMirrored.Filled.TrendingDown
+                        },
+                        contentDescription = null,
+                        tint = Palette.textTertiary,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text("${abs(deltaPct).roundToInt()}%", style = NoopType.caption, color = Palette.textTertiary, maxLines = 1)
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                today?.let { model.format(it) } ?: "—",
+                style = NoopType.number(22f),
+                color = if (today != null) Palette.textPrimary else Palette.textTertiary,
+                maxLines = 1,
+            )
+            if (model.unit.isNotEmpty() && today != null) {
+                Text(" ${model.unit}", style = NoopType.caption, color = Palette.textSecondary, maxLines = 1)
+            }
+        }
+        if (today != null && priorAvg != null) {
+            Text(
+                "7-day avg ${model.format(priorAvg)}${if (model.unit.isNotEmpty()) " ${model.unit}" else ""}",
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        if (expanded) {
-            RecoveryVitalExpanded(vitalKey = vitalKey, style = style, model = model, onOpenFull = onOpenFull)
-        }
+        LiquidTube(
+            frac = today?.let { recoveryVitalFraction(model.key, it) } ?: 0.0,
+            tint = style.tint,
+            height = 5.dp,
+            animated = false,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-@Composable
-private fun RecoveryVitalExpanded(vitalKey: String, style: RecoveryVitalStyle, model: VitalDetailModel, onOpenFull: () -> Unit) {
-    // Independent range state per row (not tied to the top card's own `range`) so exploring HRV's history
-    // doesn't silently move what the hero trend/chart above is showing.
-    var range by remember { mutableStateOf(VitalDetailRange.MONTH) }
-    val unlockedRanges = remember(model) { unlockedVitalRanges(vitalHistorySpanDays(model.points)) }
-    val effectiveRange = coercedVitalRange(range, unlockedRanges)
-    val filtered = remember(model, effectiveRange) { filterVitalReadings(model.readings, effectiveRange) }
-    if (filtered.size < 2) {
-        Text(
-            "Not enough history in this range yet.",
-            style = NoopType.footnote,
-            color = Palette.textTertiary,
-            modifier = Modifier.padding(top = Metrics.space8, start = 44.dp),
-        )
-        return
-    }
-    val values = filtered.map { it.value }
-    Column(
-        modifier = Modifier
-            .padding(start = 44.dp, top = Metrics.space8)
-            .background(Palette.surfaceOverlay, RoundedCornerShape(12.dp))
-            .padding(Metrics.space10),
-        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
-    ) {
-        SegmentedPillControl(
-            items = VitalDetailRange.entries,
-            selection = effectiveRange,
-            label = { it.label },
-            onSelect = { range = it },
-            adaptsToAvailableWidth = true,
-            enabled = { it in unlockedRanges },
-        )
-        // No day labels at this compact height (60dp) -- the range chips above already say the
-        // timeframe, and cramming date ticks under a chart this short just collides with the gridline
-        // value labels. The full vital_detail page's chart (220dp) shows them.
-        when (recoveryChartStyleFor(vitalKey)) {
-            RecoveryChartStyle.CURVE -> TrendCurveChart(
-                values = values,
-                modifier = Modifier.height(60.dp),
-                color = style.tint,
-                selectionEnabled = true,
-                formatValue = { "${model.format(it)} ${model.unit}".trim() },
-            )
-            RecoveryChartStyle.COLUMNS -> DailyColumnChart(
-                values = values,
-                modifier = Modifier.height(60.dp),
-                color = style.tint,
-                selectionEnabled = true,
-                formatValue = { "${model.format(it)} ${model.unit}".trim() },
-            )
-        }
-        Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf("Min" to values.minOrNull(), "Avg" to values.average(), "Max" to values.maxOrNull()).forEach { (label, v) ->
-                Column(modifier = Modifier.weight(1f)) {
-                    Overline(label, color = Palette.textTertiary)
-                    Text(
-                        v?.let { "${model.format(it)} ${model.unit}".trim() } ?: "—",
-                        style = NoopType.footnote,
-                        color = Palette.textPrimary,
-                    )
-                }
-            }
-            IconButton(onClick = onOpenFull, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Filled.ChevronRight,
-                    contentDescription = "Open ${model.title} full history",
-                    tint = Palette.accent,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-    }
-}
+/** A rough 0..1 visual proportion for the tile's fill bar — NOT a scored/clinical fraction, just enough
+ *  to give the bar a sensible fill level. Mirrors the caps the pre-redesign HeroVitalRow used (HRV/120,
+ *  RHR/100, respiration/24); SpO2 assumes a 0-100% scale, skin temperature a +-2C deviation window. */
+private fun recoveryVitalFraction(key: String, value: Double): Double = when (key) {
+    "hrv" -> value / 120.0
+    "rhr" -> value / 100.0
+    "resp" -> value / 24.0
+    "spo2" -> value / 100.0
+    "skin" -> (value + 2.0) / 4.0
+    else -> 0.0
+}.coerceIn(0.0, 1.0)
 
 /** The intraday Heart Rate chart + window pills + min/avg/max, moved off Today's inline card into the
  *  Effort detail screen (2026-08 redesign). Always TODAY's logical day — no day-selector, since this
