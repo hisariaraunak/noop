@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -33,6 +34,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -400,6 +402,367 @@ fun LineChart(
                 },
         )
     }
+}
+
+// MARK: - Recovery vital charts (2026-08) — TrendCurveChart / DailyColumnChart
+//
+// Two new chart styles, scoped to the Charge page's six recovery-vital pages (recovery, hrv, rhr,
+// resp, spo2, skin) and their accordion mini-charts — LineChart above is UNCHANGED and still used
+// by every other screen (Today HR, Stress, Trends Explore, Apple Health, and every other
+// vital_detail key). recoveryChartStyleFor decides which of the two a given key gets.
+
+/** Which of the two new chart styles a recovery-vital key gets. */
+internal enum class RecoveryChartStyle { CURVE, COLUMNS }
+
+/** Curve for trend-relevant, night-to-night-noisy metrics (trajectory over any single day matters);
+ *  columns for normally-stable metrics where a single day's deviation is the actual signal. */
+internal fun recoveryChartStyleFor(key: String): RecoveryChartStyle = when (key) {
+    "recovery", "hrv", "rhr" -> RecoveryChartStyle.CURVE
+    "resp", "spo2", "skin" -> RecoveryChartStyle.COLUMNS
+    else -> RecoveryChartStyle.CURVE
+}
+
+/** "2026-08-06" -> "6 Aug"; the input day string unchanged if it doesn't parse. */
+private fun formatChartDayTick(day: String): String =
+    runCatching { LocalDate.parse(day).format(DateTimeFormatter.ofPattern("d MMM", Locale.US)) }.getOrDefault(day)
+
+/**
+ * Smoothed trend curve (a cubic-bezier through consecutive points, not [LineChart]'s straight
+ * segments) with faint dashed reference gridlines (their values labelled on the leading edge), a
+ * dot on every reading (not only the tap-selected one), and up to 3 sparse date labels along the
+ * bottom. Null/empty-safe like every chart here (draws [drawBaseline] with nothing to plot).
+ */
+@Composable
+fun TrendCurveChart(
+    values: List<Double>,
+    modifier: Modifier,
+    color: Color = Palette.accent,
+    // Index-aligned "yyyy-MM-dd" per value, for the sparse date ticks + the tap/drag label prefix.
+    dayLabels: List<String>? = null,
+    selectionEnabled: Boolean = false,
+    formatValue: ((Double) -> String)? = null,
+) {
+    val cleanValues = remember(values) { values.filter { it.isFinite() } }
+    val cleanDayLabels = remember(values, dayLabels) {
+        if (dayLabels == null || dayLabels.size != values.size) null
+        else values.indices.filter { values[it].isFinite() }.map { dayLabels[it] }
+    }
+    var selectedIndex by remember(cleanValues) { mutableIntStateOf(-1) }
+    val axSummary = seriesSummary(cleanValues, "Trend")
+    val gridLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textSize = 22f
+            this.color = Palette.textTertiary.toArgb()
+        }
+    }
+    val markerPaint = remember(color) {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textSize = 30f
+            this.color = color.copy(alpha = StrandAlpha.chartLabel).toArgb()
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        }
+    }
+    // Geometry shared by the cached draw + the selection overlay (same duplication LineChart already
+    // accepts above, for the same reason: the overlay redraws on every drag frame, the cache doesn't).
+    fun plottedPoints(w: Float, h: Float, leadingPad: Float, topPad: Float, bottomPad: Float): List<Offset> {
+        if (cleanValues.size < 2) return emptyList()
+        val minV = cleanValues.min(); val maxV = cleanValues.max()
+        return pointsFor(cleanValues, w - leadingPad, h, topPad, bottomPad, minV, maxV).map { Offset(it.x + leadingPad, it.y) }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .clearAndSetSemantics { contentDescription = axSummary }
+            .then(
+                if (selectionEnabled) {
+                    Modifier.pointerInput(cleanValues) {
+                        detectTapGestures(
+                            onTap = { offset ->
+                                if (cleanValues.size >= 2 && size.width > 0) {
+                                    selectedIndex = nearestIndexForX(cleanValues.size, size.width.toFloat(), offset.x)
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    val strokePx = 2.2f
+                    val leadingPad = 28f // room for the gridline value labels
+                    val topPad = strokePx + 10f
+                    val bottomPad = strokePx + (if (cleanDayLabels != null) 18f else 6f)
+                    val pts = plottedPoints(size.width, size.height, leadingPad, topPad, bottomPad)
+                    if (pts.isEmpty()) {
+                        onDrawBehind { drawBaseline() }
+                    } else {
+                        val minV = cleanValues.min(); val maxV = cleanValues.max()
+                        val linePath = Path().apply {
+                            moveTo(pts.first().x, pts.first().y)
+                            for (i in 1 until pts.size) {
+                                val prev = pts[i - 1]; val cur = pts[i]
+                                val midX = (prev.x + cur.x) / 2f
+                                cubicTo(midX, prev.y, midX, cur.y, cur.x, cur.y)
+                            }
+                        }
+                        val floorY = size.height - bottomPad
+                        val fillPath = Path().apply {
+                            addPath(linePath)
+                            lineTo(pts.last().x, floorY)
+                            lineTo(pts.first().x, floorY)
+                            close()
+                        }
+                        val fillBrush = Brush.verticalGradient(
+                            colors = listOf(
+                                color.copy(alpha = StrandAlpha.chartFillStrong),
+                                color.copy(alpha = StrandAlpha.chartFillSoft),
+                                Color.Transparent,
+                            ),
+                            startY = topPad,
+                            endY = floorY,
+                        )
+                        val lineStroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        val gridDash = PathEffect.dashPathEffect(floatArrayOf(3f, 5f), 0f)
+                        val gridVs = listOf(maxV, (minV + maxV) / 2.0, minV)
+                        val gridYs = gridVs.map { v ->
+                            val norm = if (maxV > minV) ((v - minV) / (maxV - minV)).toFloat() else 0.5f
+                            topPad + (1f - norm) * (floorY - topPad)
+                        }
+                        val tickPositions = if (cleanDayLabels != null && pts.size >= 2) {
+                            listOf(0, pts.size / 2, pts.size - 1).distinct()
+                        } else {
+                            emptyList()
+                        }
+                        onDrawBehind {
+                            gridYs.forEachIndexed { i, y ->
+                                drawLine(
+                                    color = Palette.hairline,
+                                    start = Offset(leadingPad, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1f,
+                                    pathEffect = gridDash,
+                                )
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    formatValue?.invoke(gridVs[i]) ?: formatLineValue(gridVs[i]),
+                                    0f, y + 7f, gridLabelPaint,
+                                )
+                            }
+                            drawPath(path = fillPath, brush = fillBrush)
+                            drawPath(path = linePath, color = color, style = lineStroke)
+                            pts.forEach { p ->
+                                drawCircle(color = Palette.surfaceBase, radius = 4.5f, center = p)
+                                drawCircle(color = color, radius = 3f, center = p)
+                            }
+                            tickPositions.forEach { i ->
+                                cleanDayLabels?.getOrNull(i)?.let { day ->
+                                    val label = formatChartDayTick(day)
+                                    val x = when (i) {
+                                        0 -> pts[i].x
+                                        pts.size - 1 -> (pts[i].x - 26f).coerceAtLeast(leadingPad)
+                                        else -> pts[i].x - 12f
+                                    }
+                                    drawContext.canvas.nativeCanvas.drawText(label, x, size.height - 2f, gridLabelPaint)
+                                }
+                            }
+                        }
+                    }
+                }
+                .drawWithContent {
+                    drawContent()
+                    if (selectionEnabled && selectedIndex >= 0) {
+                        val strokePx = 2.2f
+                        val leadingPad = 28f
+                        val topPad = strokePx + 10f
+                        val bottomPad = strokePx + (if (cleanDayLabels != null) 18f else 6f)
+                        val pts = plottedPoints(size.width, size.height, leadingPad, topPad, bottomPad)
+                        if (selectedIndex in pts.indices) {
+                            val p = pts[selectedIndex]
+                            val floorY = size.height - bottomPad
+                            drawLine(
+                                color = color.copy(alpha = StrandAlpha.chartMarker),
+                                start = Offset(p.x, topPad),
+                                end = Offset(p.x, floorY),
+                                strokeWidth = 1.5f,
+                                cap = StrokeCap.Round,
+                            )
+                            drawCircle(color = color, radius = 5f, center = p)
+                            drawCircle(color = Palette.surfaceBase.copy(alpha = StrandAlpha.chartShadow), radius = 9f, center = p)
+                            drawCircle(color = color, radius = 4.5f, center = p)
+                            drawContext.canvas.nativeCanvas.drawText(
+                                lineChartSelectionLabel(
+                                    value = cleanValues[selectedIndex],
+                                    formatValue = formatValue,
+                                    pointLabel = cleanDayLabels?.getOrNull(selectedIndex)?.let { formatChartDayTick(it) },
+                                ),
+                                leadingPad, 20f, markerPaint,
+                            )
+                        }
+                    }
+                },
+        )
+    }
+}
+
+/**
+ * Discrete daily columns, min/max-scaled (NOT a zero baseline like [BarChart], which would flatten
+ * a narrow-range metric like SpO2 into near-identical bars) — for normally-stable metrics where a
+ * single day's deviation is the signal a smoothed curve would bury. Draw order: columns, THEN the
+ * dashed average reference line on top of them (so it stays visible across every bar it crosses,
+ * including the tallest), THEN the latest bar's value labelled above it.
+ */
+@Composable
+fun DailyColumnChart(
+    values: List<Double>,
+    modifier: Modifier,
+    color: Color = Palette.accent,
+    dayLabels: List<String>? = null,
+    selectionEnabled: Boolean = false,
+    formatValue: ((Double) -> String)? = null,
+) {
+    val cleanValues = remember(values) { values.filter { it.isFinite() } }
+    val cleanDayLabels = remember(values, dayLabels) {
+        if (dayLabels == null || dayLabels.size != values.size) null
+        else values.indices.filter { values[it].isFinite() }.map { dayLabels[it] }
+    }
+    var selectedIndex by remember(cleanValues) { mutableIntStateOf(-1) }
+    val axSummary = seriesSummary(cleanValues, "Daily readings")
+    val unselectedColor = remember(color) { color.copy(alpha = 0.5f) }
+    val valueLabelPaint = remember(color) {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textSize = 26f
+            this.color = color.toArgb()
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        }
+    }
+    val markerPaint = remember(color) {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textSize = 30f
+            this.color = color.copy(alpha = StrandAlpha.chartLabel).toArgb()
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        }
+    }
+    val dateLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textSize = 20f
+            this.color = Palette.textTertiary.toArgb()
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = axSummary }
+            .then(
+                if (selectionEnabled) {
+                    Modifier.pointerInput(cleanValues) {
+                        detectTapGestures(
+                            onTap = { offset ->
+                                if (cleanValues.isNotEmpty() && size.width > 0) {
+                                    selectedIndex = nearestBarIndexForX(cleanValues.size, size.width.toFloat(), offset.x)
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .drawWithCache {
+                val w = size.width
+                val bottomPad = if (cleanDayLabels != null) 16f else 2f
+                val topPad = 22f // room for the latest-bar value label
+                val h = (size.height - bottomPad - topPad).coerceAtLeast(1f)
+                if (cleanValues.isEmpty() || w <= 0f || h <= 0f) {
+                    onDrawBehind { drawBaseline() }
+                } else {
+                    val minV = cleanValues.min()
+                    val maxV = cleanValues.max()
+                    val span = (maxV - minV).takeIf { it > 0.0 } ?: 1.0
+                    val slot = w / cleanValues.size
+                    val barWidth = (slot * 0.6f).coerceAtLeast(2f)
+                    val cap = barWidth / 2f
+                    val lastIdx = cleanValues.size - 1
+                    // A floor so a near-minimum bar is never visually zero — 20% minimum height, the
+                    // remaining 80% carries the min-max range (mirrors OverviewHRChart's own convention).
+                    fun barTop(v: Double): Float {
+                        val norm = ((v - minV) / span).toFloat().coerceIn(0f, 1f)
+                        val barH = (norm * h * 0.8f + h * 0.2f).coerceAtLeast(cap)
+                        return topPad + h - barH
+                    }
+                    val tops = cleanValues.map { barTop(it) }
+                    val avg = cleanValues.average()
+                    val avgNorm = ((avg - minV) / span).toFloat().coerceIn(0f, 1f)
+                    val avgY = topPad + h - (avgNorm * h * 0.8f + h * 0.2f)
+                    val dash = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
+                    val floorY = topPad + h
+                    val firstTickX = 4f
+                    val lastTickX = w - 4f
+
+                    onDrawBehind {
+                        // 1) Columns.
+                        tops.forEachIndexed { i, top ->
+                            val cx = slot * i + slot / 2f
+                            val barColor = when {
+                                i == lastIdx -> color
+                                selectionEnabled && i == selectedIndex -> color
+                                else -> unselectedColor
+                            }
+                            drawLine(
+                                color = barColor,
+                                start = Offset(cx, floorY),
+                                end = Offset(cx, (top + cap).coerceAtMost(floorY)),
+                                strokeWidth = barWidth,
+                                cap = StrokeCap.Round,
+                            )
+                        }
+                        // 2) THE FIX: the average line draws after the bars, on top of them.
+                        drawLine(
+                            color = Palette.textTertiary,
+                            start = Offset(0f, avgY),
+                            end = Offset(w, avgY),
+                            strokeWidth = 1.3f,
+                            pathEffect = dash,
+                        )
+                        // 3) Latest bar's value, labelled above it.
+                        val lastCx = slot * lastIdx + slot / 2f
+                        drawContext.canvas.nativeCanvas.drawText(
+                            formatValue?.invoke(cleanValues[lastIdx]) ?: formatLineValue(cleanValues[lastIdx]),
+                            (lastCx - 16f).coerceIn(0f, (w - 32f).coerceAtLeast(0f)),
+                            (tops[lastIdx] - 6f).coerceAtLeast(16f),
+                            valueLabelPaint,
+                        )
+                        if (cleanDayLabels != null) {
+                            drawContext.canvas.nativeCanvas.drawText(cleanDayLabels.first().let(::formatChartDayTick), firstTickX, size.height - 1f, dateLabelPaint)
+                            drawContext.canvas.nativeCanvas.drawText(
+                                cleanDayLabels.last().let(::formatChartDayTick), lastTickX - 30f, size.height - 1f, dateLabelPaint,
+                            )
+                        }
+                        if (selectionEnabled && selectedIndex in cleanValues.indices && selectedIndex != lastIdx) {
+                            drawContext.canvas.nativeCanvas.drawText(
+                                lineChartSelectionLabel(
+                                    value = cleanValues[selectedIndex],
+                                    formatValue = formatValue,
+                                    pointLabel = cleanDayLabels?.getOrNull(selectedIndex)?.let { formatChartDayTick(it) },
+                                ),
+                                8f, 20f, markerPaint,
+                            )
+                        }
+                    }
+                }
+            },
+    )
 }
 
 data class LineSeries(
