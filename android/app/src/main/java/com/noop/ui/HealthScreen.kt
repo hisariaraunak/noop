@@ -1662,7 +1662,10 @@ private data class VitalDetailModel(
  *  (Fitness Age + Vitality under the computed strap, Steps estimate, Apple active energy). Each Today
  *  dashboard card taps through to ITS OWN focused trend here (2026-07-03), so these load their
  *  series from the repo on demand rather than off the cached `days` columns. Mirrors iOS metricDetail. */
-private val SERIES_BACKED_VITAL_KEYS = setOf("fitness_age", "vitality", "steps_est", "active_kcal", "rest")
+// "rest" retired (2026-08): folded into the Sleep tab's own RestTrendCard (SleepScreen.kt), which reads
+// the SAME resolvedRestPoints("sleep_performance") source this used to. Today's Rest ring + Key Metrics
+// REST tile now jump to the Sleep tab instead of this route.
+private val SERIES_BACKED_VITAL_KEYS = setOf("fitness_age", "vitality", "steps_est", "active_kcal")
 
 /** The six Charge-page recovery vitals (2026-08 chart redesign) — see [recoveryChartStyleFor]. */
 private val RECOVERY_CHART_KEYS = setOf("recovery", "hrv", "rhr", "resp", "spo2", "skin")
@@ -2762,16 +2765,6 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
     // The Today Key-Metrics Rest tile's drill-in: the Rest composite (sleep_performance) trend, read via
     // the SAME imported-wins resolvedSeries merge the tile's score/sparkline use, so the detail can never
     // disagree with the tile (#248 lineage). Each reading names its winning source for the caption.
-    "rest" -> VitalDetailModel(
-        key = key,
-        title = uiString(R.string.l10n_health_screen_rest_b79e5f48),
-        unit = "%",
-        color = Palette.restColor,
-        readings = vm.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = vm.activeStrapId)
-            .points.map { VitalReading(it.day, it.value, it.source) },
-        format = { it.roundToInt().toString() },
-    )
     "fitness_age" -> VitalDetailModel(
         key = key,
         title = uiString(R.string.l10n_health_screen_fitness_age_12383b4a),

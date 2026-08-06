@@ -1383,6 +1383,7 @@ fun TodayScreen(
                                     // Charge ring used to open is unchanged and still reachable from the
                                     // Readiness card's "what shaped it" tap.
                                     onOpenMetric = onOpenMetric,
+                                    onOpenSleep = onOpenSleep,
                                 )
                             }
                             // Honest "why is Effort 0?" caption — only when today's Effort is a real
@@ -1490,6 +1491,7 @@ fun TodayScreen(
                                     onToggleMetrics = { metricsExpanded = !metricsExpanded },
                                     detailed = keyMetricsDetailed,
                                     onOpenMetric = onOpenMetric,
+                                    onOpenSleep = onOpenSleep,
                                 )
                             }
                         }
@@ -2272,12 +2274,16 @@ private fun ScoreHeroRow(
     liveTodayStrain: Double? = null,
     // Opens a score's own detail trend (vital_detail/<key>) — the SAME destination its Key Metrics tile
     // uses, so "tap the thing, see its history" holds wherever the score appears. Each ring's label is
-    // wired to it below (the ring itself only splashes — see HeroRingColumn).
+    // wired to it below (the ring itself only splashes — see HeroRingColumn). Rest is the exception (see
+    // onOpenSleep below) — its trend lives on the Sleep tab now, not a vital_detail page.
     onOpenMetric: (String) -> Unit = {},
     // One shared "How your scores work" entry point for the whole card (not per-ring, since it's one
     // explainer covering all three) — called with null, which opens the guide at the top with no section
     // pre-selected (the same nullable type `openGuide` already is; see TodayScreen's openGuide/guideSection).
     onScoreInfo: (ScoreSection?) -> Unit,
+    // Rest's own trend was folded into the Sleep tab (2026-08, vital_detail/rest retired) — the Rest
+    // ring jumps straight there instead of onOpenMetric("rest").
+    onOpenSleep: () -> Unit = {},
 ) {
     val recovery = day?.recovery
     // Prefer the live in-progress Effort for today, but never BELOW the day's already-earned strain
@@ -2382,7 +2388,7 @@ private fun ScoreHeroRow(
                 Box(modifier = Modifier.width(ring)) {
                     HeroRingColumn(
                         domain = DomainTheme.Rest,
-                        onRingTap = { onOpenMetric("rest") },
+                        onRingTap = onOpenSleep,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             HeroScoreVessel(
@@ -4319,8 +4325,10 @@ private fun MetricGrid(
     // Detailed tiles (the #251 editor's switch): squarer tiles with a 14-day trend graph under the bar.
     detailed: Boolean = false,
     // Tile drill-ins: every tile opens its focused trend timeline (vital_detail/<key>, the Sleep
-    // night-detail pattern) via [onOpenMetric].
+    // night-detail pattern) via [onOpenMetric]. Rest is the exception — its trend was folded into the
+    // Sleep tab (2026-08, vital_detail/rest retired), so its tile jumps straight there via [onOpenSleep].
     onOpenMetric: (String) -> Unit = {},
+    onOpenSleep: () -> Unit = {},
 ) {
     // FIX 3 (iOS `keyMetricsSection` parity): a 3-COLUMN grid of COMPACT liquid tiles, each an iOS `ktile`
     // — a 9sp/+1.2 overline label, a value + small unit, and a thin 8dp LiquidTube fill bar — REPLACING the
@@ -4461,7 +4469,7 @@ private fun MetricGrid(
     fun tapFor(metric: KeyMetric): (() -> Unit)? = when (metric) {
         KeyMetric.CHARGE -> ({ onOpenMetric("recovery") })
         KeyMetric.EFFORT -> ({ onOpenMetric("strain") })
-        KeyMetric.REST -> ({ onOpenMetric("rest") })
+        KeyMetric.REST -> onOpenSleep
         KeyMetric.HRV -> ({ onOpenMetric("hrv") })
         KeyMetric.RESTING_HR -> ({ onOpenMetric("rhr") })
         KeyMetric.BLOOD_OXYGEN -> ({ onOpenMetric("spo2") })

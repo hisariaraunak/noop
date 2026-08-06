@@ -31,6 +31,15 @@ internal fun sleepMetricSpec(key: String): SleepMetricSpec = when (key) {
     else              -> SleepMetricSpec(key, "", Palette.accent) { "${it.roundToInt()}" }
 }
 
+/** The Rest ("sleep_performance") trend, resolved imported-first — the SAME `resolvedSeries` call
+ *  HealthScreen's now-retired `vital_detail/rest` page used, so Sleep's own Rest trend (this new inline
+ *  card, and the "Rest" metric-grid tile's sheet below) can never quietly disagree with what a user with
+ *  imported sleep data used to see there. Async (resolvedSeries hits the repo), unlike the rest of
+ *  [buildSleepMetricPoints]'s synchronous, already-loaded-`days` metrics. */
+internal suspend fun resolvedRestPoints(vm: AppViewModel): List<Pair<String, Double>> =
+    vm.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99", strapDeviceId = vm.activeStrapId)
+        .points.map { it.day to it.value }
+
 internal fun buildSleepMetricPoints(days: List<DailyMetric>, key: String): List<Pair<String, Double>> {
     val needMin = max(450.0, days.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 } }.average().let { if (it.isNaN()) 480.0 else it })
     return days.mapNotNull { d ->

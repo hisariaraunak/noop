@@ -623,6 +623,12 @@ fun SleepScreen(
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { MetricGrid(m, onMetricClick = { detailMetricKey = it }) }
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                // Rest's own trend, folded in from the now-retired vital_detail/rest (2026-08): Sleep
+                // already owned everything else in this domain (hypnogram, debt, Smart Alarm), this was
+                // the one gap. Its own item{} (not inside the "Rest" tile's tap-through sheet above) so
+                // it's visible without an extra tap, matching how Effort/Charge fold their trends in.
+                item { RestTrendCard(vm) }
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { SleepDebtLedgerCard(m.sleepDebtLedger) }
                 // StagesVsTypical describes ONE specific night's deep/REM/light minutes under the
                 // "Selected night" header, so it must read the SELECTED day's model, never the
@@ -2479,6 +2485,72 @@ private fun DrawScope.drawRoundRectFill(color: Color, frac: Float) {
 
 // MARK: - 4. 14-day asleep-hours trend
 
+/** Rest's own trend, folded into Sleep from the now-retired `vital_detail/rest` (2026-08): the exact
+ *  same imported-first data ([resolvedRestPoints]) and the SAME [TrendCurveChart] style Charge's Recovery
+ *  card uses (composite score, trajectory matters more than one night — same bucket as Recovery/HRV/RHR),
+ *  tinted [Palette.restColor] instead of Charge's green. A narrowed 3-chip range picker (W/M/3M), matching
+ *  the Charge page's own narrowed picker, not the 6-chip one the "Rest" metric-grid tile's sheet still has. */
+@Composable
+private fun RestTrendCard(vm: AppViewModel) {
+    var allPoints by remember { mutableStateOf<List<Pair<String, Double>>?>(null) }
+    LaunchedEffect(vm) { allPoints = resolvedRestPoints(vm) }
+    var range by remember { mutableStateOf(SleepMetricRange.MONTH) }
+    val restRanges = remember { listOf(SleepMetricRange.WEEK, SleepMetricRange.MONTH, SleepMetricRange.THREE_MONTH) }
+    val points = allPoints
+    val filtered = remember(points, range) {
+        points?.let { filterSleepMetricPoints(it, range) }.orEmpty()
+    }
+
+    SectionHeader("Rest trend", overline = "Sleep")
+    if (points == null) {
+        NoopCard { TrendPlaceholder() }
+        return
+    }
+    if (filtered.size < 2) {
+        NoopCard { TrendPlaceholder() }
+        return
+    }
+    val values = filtered.map { it.second }
+    val dayLabels = filtered.map { it.first }
+    val latest = values.last()
+    val minV = values.minOrNull() ?: 0.0
+    val maxV = values.maxOrNull() ?: 0.0
+    val avgV = values.average()
+
+    ChartCard(
+        title = "Rest",
+        subtitle = "Trailing ${filtered.size} nights",
+        trailing = "${latest.roundToInt()}%",
+        tint = Palette.restColor,
+        footer = {
+            ChartFooter(
+                listOf(
+                    "Min" to "${minV.roundToInt()}%",
+                    "Avg" to "${avgV.roundToInt()}%",
+                    "Max" to "${maxV.roundToInt()}%",
+                ),
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SegmentedPillControl(
+                items = restRanges,
+                selection = range,
+                label = { it.label },
+                onSelect = { range = it },
+            )
+            TrendCurveChart(
+                values = values,
+                modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight),
+                color = Palette.restColor,
+                dayLabels = dayLabels,
+                selectionEnabled = true,
+                formatValue = { "${it.roundToInt()}%" },
+            )
+        }
+    }
+}
+
 @Composable
 private fun DurationTrend(m: SleepModel) {
     val pts = m.trendHours
@@ -3039,14 +3111,30 @@ private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     var range by remember { mutableStateOf(SleepMetricRange.MONTH) }
     val spec = remember(key) { sleepMetricSpec(key) }
-    val allPoints = remember(days, key) { buildSleepMetricPoints(days, key) }
+    // Rest ("performance") is the one metric here resolved imported-first (resolvedRestPoints, async) —
+    // the same source the new inline Rest trend card uses, so this sheet can't disagree with it. Every
+    // other key keeps the existing synchronous, already-loaded-`days` computation unchanged.
+    var resolvedRest by remember { mutableStateOf<List<Pair<String, Double>>?>(null) }
+    if (key == "performance") {
+        LaunchedEffect(vm) { resolvedRest = resolvedRestPoints(vm) }
+    }
+    val allPoints = if (key == "performance") {
+        resolvedRest ?: emptyList()
+    } else {
+        remember(days, key) { buildSleepMetricPoints(days, key) }
+    }
     val filteredPoints = remember(allPoints, range) { filterSleepMetricPoints(allPoints, range) }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = Metrics.space24, vertical = Metrics.space8),
         verticalArrangement = Arrangement.spacedBy(Metrics.space16),
     ) {
-        if (allPoints.size < 2) {
+        if (key == "performance" && resolvedRest == null) {
+            // Guards the "not enough history" flash while resolvedRestPoints is still in flight — an
+            // empty list before the load completes must not read as "no data", same guard shape
+            // HealthScreen's series-backed vital_detail keys already use.
+            Text(uiString(R.string.l10n_health_screen_loading_33ce4174), style = NoopType.headline, color = Palette.textPrimary)
+        } else if (allPoints.size < 2) {
             Text(uiString(R.string.l10n_sleep_screen_not_enough_history_yet_0e2f93b6), style = NoopType.headline, color = Palette.textPrimary)
             Text(
                 uiString(R.string.l10n_sleep_screen_this_metric_needs_at_least_two_2de1d37a),
