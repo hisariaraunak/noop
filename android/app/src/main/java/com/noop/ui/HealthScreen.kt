@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
@@ -40,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,7 +59,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -64,13 +70,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.noop.analytics.Baselines
+import com.noop.analytics.HrZones
 import com.noop.analytics.IllnessSignalEngine
+import com.noop.analytics.StrainScorer
 import com.noop.analytics.V5HealthSignals
 import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.VitalityEngine
@@ -81,6 +91,10 @@ import com.noop.analytics.FitnessReadinessStatus
 import com.noop.analytics.VitalBands
 import com.noop.ble.LiveState
 import com.noop.data.DailyMetric
+import com.noop.data.HrBucket
+import com.noop.data.HrSample
+import com.noop.data.SleepSession
+import com.noop.data.WorkoutRow
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -1853,6 +1867,342 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             vitalReadingRows(filteredReadings, detail.unit, strapId, detail.format)
         }
         VitalReadingsTable(rows = readingRows)
+
+        // The Effort screen is the "reimagined" home for heart-rate detail (2026-08): today's intraday HR
+        // chart moved here off Today's compact HeartRateSummaryRow tap-through, plus a new time-in-zones
+        // breakdown. Both are TODAY-only (no day-selector here, unlike the multi-day trend above) — see the
+        // plan's scope note: Today's old day-stepper let you browse a past day's HR curve inline; that
+        // capability isn't reproduced here, only the common "today" case.
+        if (key == "strain") {
+            EffortHeartRateSection(vm = vm, days = days, effortScale = effortScale)
+        }
+    }
+}
+
+/** The intraday Heart Rate chart + window pills + min/avg/max, moved off Today's inline card into the
+ *  Effort detail screen (2026-08 redesign). Always TODAY's logical day — no day-selector, since this
+ *  screen otherwise browses a multi-day Effort trend, not a single day. Reuses the SAME building blocks
+ *  the old Today card used (`OverviewHRChart`/`HrWindowPills`/`HrTimeAxisLabels`/`hrChartTransformGestures`,
+ *  now `internal` in TodayScreen.kt) so the chart is byte-identical to what Today used to render inline. */
+@Composable
+private fun EffortHeartRateSection(vm: AppViewModel, days: List<DailyMetric>, effortScale: EffortScale) {
+    val context = LocalContext.current
+    val profile = remember { ProfileStore.from(context.applicationContext) }
+    val today = remember { logicalDayNow() }
+    val todayKey = remember { logicalDayKeyNow() }
+    val todayRow = remember(days, todayKey) { days.firstOrNull { it.day == todayKey } }
+
+    var buckets by remember { mutableStateOf<List<HrBucket>>(emptyList()) }
+    var hrSamples by remember { mutableStateOf<List<HrSample>>(emptyList()) }
+    var sleepToday by remember { mutableStateOf<SleepSession?>(null) }
+    var workoutsToday by remember { mutableStateOf<List<WorkoutRow>>(emptyList()) }
+    var liveTodayStrain by remember { mutableStateOf<Double?>(null) }
+    // #985 parity: the same Today/24h/12h/6h/3h/1h window narrowing, and the same pinch/pan zoom, the old
+    // inline card offered — view-only, never re-queries.
+    var hrWindowOrdinal by rememberSaveable { mutableIntStateOf(0) }
+    val hrWindow = HrWindow.entries[hrWindowOrdinal]
+    var hrZoom by remember(hrWindowOrdinal) { mutableStateOf<LongRange?>(null) }
+
+    val live by vm.live.collectAsStateWithLifecycle()
+    LaunchedEffect(days, live.lastSyncAt, live.syncChunksThisSession) {
+        val zone = ZoneId.systemDefault()
+        val start = today.atStartOfDay(zone).toEpochSecond()
+        val now = System.currentTimeMillis() / 1000
+        buckets = vm.repo.hrBucketsUnion(vm.activeStrapId, start, now, 300L)
+        hrSamples = runCatching { vm.repo.hrSamplesUnion(vm.activeStrapId, start, now) }.getOrDefault(emptyList())
+        sleepToday = runCatching {
+            val overlapping = vm.repo.sleepSessions("my-whoop", start - 18 * 3600L, now)
+                .filter { it.startTs <= now && it.endTs >= start }
+            val habitualMidsleepSec = vm.repo.habitualMidsleepSec("my-whoop")
+            mainSleepSpan(overlapping, habitualMidsleepSec)?.let { (spanStart, spanEnd) ->
+                SleepSession(deviceId = "my-whoop", startTs = spanStart, endTs = spanEnd)
+            }
+        }.getOrNull()
+        workoutsToday = runCatching {
+            vm.repo.workoutsAllSources(vm.deviceId, start - 6 * 3600L, now)
+                .filter { it.startTs <= now && it.endTs >= start }
+        }.getOrDefault(emptyList())
+        // Live in-progress Effort for today (#402/#1001 parity): the stored row lags until the heavy daily
+        // pass re-scores, so integrate today's raw HR the same way TodayScreen's liveTodayStrain does.
+        liveTodayStrain = StrainScorer.strain(
+            hr = hrSamples,
+            maxHR = profile.hrMax.toDouble(),
+            restingHR = todayRow?.restingHr?.toDouble() ?: StrainScorer.defaultRestingHR,
+            sex = profile.sex,
+        )
+    }
+    val effortForDay = StrainScorer.effectiveEffort(live = liveTodayStrain, stored = todayRow?.strain)
+
+    val winBuckets = remember(buckets, hrWindow) {
+        val now = System.currentTimeMillis() / 1000
+        if (hrWindow == HrWindow.TODAY) buckets else buckets.filter { hrWindowKeeps(it.bucket, hrWindow, now) }
+    }
+
+    SectionHeader(title = "Heart Rate", overline = "Today")
+    if (winBuckets.size < 2) {
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Overline("Beats per minute")
+                HrWindowPills(hrWindow) { hrWindowOrdinal = it.ordinal }
+                Text(
+                    if (hrWindow != HrWindow.TODAY && buckets.size >= 2) {
+                        "No heart rate in the last ${hrWindow.label}. Try a wider window or Today."
+                    } else {
+                        "Calibrating, no heart rate banked yet today. Your curve fills in as the strap offloads."
+                    },
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+        return
+    }
+
+    val bpm = remember(winBuckets) { winBuckets.map { it.avgBpm } }
+    val latest = bpm.last().roundToInt()
+    val min = bpm.min().roundToInt()
+    val max = bpm.max().roundToInt()
+    val avg = bpm.average().roundToInt()
+
+    val zoomBounds = winBuckets.first().bucket..winBuckets.last().bucket
+    val visBuckets = remember(winBuckets, hrZoom) {
+        val sub = hrZoom?.let { w -> winBuckets.filter { it.bucket in w } } ?: winBuckets
+        if (sub.size >= 2) sub else winBuckets
+    }
+    val visBpm = remember(visBuckets) { visBuckets.map { it.avgBpm } }
+    val visMax = visBpm.max().roundToInt()
+    val visAvg = visBpm.average().roundToInt()
+    val visMin = visBpm.min().roundToInt()
+    val timeTicks = remember(visBuckets) {
+        chartTimeTicks(visBuckets.first().bucket, visBuckets.last().bucket, ZoneId.systemDefault())
+    }
+    val visTimestamps = remember(visBuckets) { visBuckets.map { it.bucket } }
+
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Beats per minute")
+                    Text(
+                        if (hrWindow == HrWindow.TODAY) "5-minute average | since midnight"
+                        else "5-minute average | last ${hrWindow.label}",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Text(uiString(R.string.l10n_today_screen_latest_bpm_e7bec767, latest), style = NoopType.chartValueLarge, color = Palette.metricRose)
+            }
+            HrWindowPills(hrWindow) { hrWindowOrdinal = it.ordinal }
+            Row(
+                modifier = Modifier.height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Column(
+                    modifier = Modifier.height(Metrics.chartHeight),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(uiString(R.string.l10n_today_screen_vismax_80b2c2fc, visMax), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
+                    Text(uiString(R.string.l10n_today_screen_visavg_8c9a4746, visAvg), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
+                    Text(uiString(R.string.l10n_today_screen_vismin_5d665ceb, visMin), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    OverviewHRChart(
+                        buckets = visBuckets,
+                        bpm = visBpm,
+                        sleep = sleepToday,
+                        workouts = workoutsToday,
+                        recovery = todayRow?.recovery,
+                        strain = effortForDay,
+                        effortScale = effortScale,
+                        timeTicks = timeTicks,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(Metrics.chartHeight)
+                            .pointerInput(winBuckets) {
+                                hrChartTransformGestures(
+                                    buckets = winBuckets,
+                                    bounds = zoomBounds,
+                                    window = { hrZoom },
+                                    onWindow = { hrZoom = it },
+                                )
+                            },
+                    )
+                    HrTimeAxisLabels(
+                        ticks = timeTicks,
+                        timestamps = visTimestamps,
+                        showNow = hrZoom == null,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Metrics.divider)
+                    .background(Palette.hairline),
+            )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("Min" to min, "Avg" to avg, "Max" to max).forEach { (label, value) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(label, color = Palette.textTertiary)
+                        Text(uiString(R.string.l10n_today_screen_value_bpm_8f3a90c3, value), style = NoopType.bodyNumber, color = Palette.textPrimary)
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (hrZoom == null) "Pinch to zoom · drag to pan" else "Zoomed in · drag to pan",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (hrZoom != null) {
+                    Text(
+                        uiString(R.string.l10n_today_screen_reset_44c57abd),
+                        style = NoopType.footnote,
+                        color = Palette.accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClickLabel = "Reset the heart rate zoom") { hrZoom = null }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    EffortZonesSection(hrSamples = hrSamples, hrMax = profile.hrMax)
+}
+
+/** Short name + description per HR zone, straight off the `HrZones.kt` %HRmax band-edge comments (Zone 1
+ *  "very light / recovery" … Zone 5 "maximum"). Presentation-only, no analytics claim of its own. */
+private val ZONE_BLURBS = mapOf(
+    1 to ("Very light" to "Recovery pace, minimal cardiovascular strain."),
+    2 to ("Light" to "Easy aerobic effort, fat-burning pace."),
+    3 to ("Moderate" to "Steady aerobic effort, comfortably hard."),
+    4 to ("Hard" to "Threshold effort, hard but sustainable."),
+    5 to ("Maximum" to "All-out effort, sustainable only briefly."),
+)
+
+/** Today's time-in-HR-zone breakdown, below the Heart Rate chart. Reuses [HrZones.timeInZone] (the SAME
+ *  analytics already computed for Live/LiveWorkout, just fed today's whole-day samples instead of one
+ *  session) and the SAME [SegmentBar] stacked-bar component `WorkoutsScreen.ZonesSection` draws its
+ *  per-workout zone split with — no new chart type. Tapping a zone tile opens a minimal anchored popup
+ *  (confirmed with the user over a full ModalBottomSheet): no dimmed backdrop, no drag handle, dismissed
+ *  by tapping elsewhere or the tile again. */
+@Composable
+private fun EffortZonesSection(hrSamples: List<HrSample>, hrMax: Int) {
+    val zoneSet = remember(hrMax) { HrZones.zones(maxHR = hrMax.toDouble()) }
+    val timeInZone = remember(hrSamples, zoneSet) { HrZones.timeInZone(hrSamples, zoneSet) }
+    val total = timeInZone.total
+
+    SectionHeader(title = "Time in zones", overline = "Today")
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (total <= 0.0) {
+                Text(
+                    "Calibrating, not enough heart rate today to break down by zone yet.",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+                return@Column
+            }
+            SegmentBar(
+                segments = (1..5).map { z -> Palette.hrZoneColor(z) to (timeInZone.secondsInZone(z) / total).toFloat() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Metrics.divider)
+                    .background(Palette.hairline),
+            )
+            var selectedZone by remember { mutableStateOf<Int?>(null) }
+            var rowWidthPx by remember { mutableStateOf(0) }
+            val density = LocalDensity.current
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onSizeChanged { rowWidthPx = it.width },
+            ) {
+                (1..5).forEach { z ->
+                    val pct = (timeInZone.secondsInZone(z) / total * 100).roundToInt()
+                    val interaction = remember { MutableInteractionSource() }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .liquidPress(interaction)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                selectedZone = if (selectedZone == z) null else z
+                            },
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(9.dp)
+                                    .background(Palette.hrZoneColor(z), RoundedCornerShape(2.dp)),
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Overline("Z$z")
+                        }
+                        Text("$pct%", style = NoopType.number(15f), color = Palette.textPrimary, maxLines = 1)
+                    }
+                }
+            }
+            Text(
+                "Share of today's tracked heart rate time.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+
+            val zone = selectedZone
+            if (zone != null) {
+                val (name, blurb) = ZONE_BLURBS.getValue(zone)
+                val band = zoneSet.zones[zone - 1]
+                val zonePct = (timeInZone.secondsInZone(zone) / total * 100).roundToInt()
+                val tileWidthPx = if (rowWidthPx > 0) rowWidthPx / 5 else 0
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset = IntOffset(
+                        x = tileWidthPx * (zone - 1),
+                        y = with(density) { 54.dp.roundToPx() },
+                    ),
+                    onDismissRequest = { selectedZone = null },
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = 220.dp)
+                            .background(Palette.surfaceOverlay, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(10.dp)
+                                    .background(Palette.hrZoneColor(zone), RoundedCornerShape(3.dp)),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Zone $zone · $name", style = NoopType.subhead, color = Palette.textPrimary)
+                        }
+                        Text(
+                            "${(band.lowerPct * 100).roundToInt()}–${(band.upperPct * 100).roundToInt()}% max HR · " +
+                                "${band.lower.roundToInt()}–${band.upper.roundToInt()} bpm",
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                        Text(blurb, style = NoopType.caption, color = Palette.textSecondary)
+                        Text("Today so far · $zonePct%", style = NoopType.caption, color = Palette.textTertiary)
+                    }
+                }
+            }
+        }
     }
 }
 

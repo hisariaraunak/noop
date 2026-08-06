@@ -5,7 +5,7 @@ import android.content.Context
 // MARK: - Reorderable Today sections (#today-layout)
 //
 // The Today screen's sections — the Charge/Effort/Rest hero, the Start-session entry, Synthesis, Key
-// Metrics, Workouts, Heart Rate, Recovery Vitals, Your Cards — rendered in one fixed order. This lets the
+// Metrics, Workouts, Heart Rate & Vitals, Your Cards — rendered in one fixed order. This lets the
 // user REORDER or HIDE them, with the default being the original order so nothing changes for anyone who
 // never customizes Today. Display-only — no metric is computed or stored differently; this only decides
 // which already-built sections render and in what sequence.
@@ -26,8 +26,10 @@ enum class TodaySection(val raw: String, val title: String) {
     SYNTHESIS("synthesis", "Synthesis"),
     KEY_METRICS("keyMetrics", "Key Metrics"),
     WORKOUTS("workouts", "Workouts"),
-    HEART_RATE("heartRate", "Heart Rate"),
-    RECOVERY_VITALS("recoveryVitals", "Recovery Vitals"),
+    // Merged with the former RECOVERY_VITALS section into one card (compact HR row + vitals tiles);
+    // the `raw` id stays "heartRate" so a pre-existing saved section order still resolves this entry.
+    // A saved order containing the old "recoveryVitals" token just drops it (see decodeOrder below).
+    HEART_RATE("heartRate", "Heart Rate & Vitals"),
     YOUR_CARDS("yourCards", "Your Cards"),
     JOURNAL("journal", "Journal");
 
@@ -37,7 +39,7 @@ enum class TodaySection(val raw: String, val title: String) {
         /** The original, hard-coded section order — the default when the layout isn't customised. The
          *  journal widget (#656) is last by default, where it was first added, above the data-sources card. */
         val defaultOrder: List<TodaySection> = listOf(
-            HERO, LIVE_SESSION, SYNTHESIS, KEY_METRICS, WORKOUTS, HEART_RATE, RECOVERY_VITALS, YOUR_CARDS,
+            HERO, LIVE_SESSION, SYNTHESIS, KEY_METRICS, WORKOUTS, HEART_RATE, YOUR_CARDS,
             JOURNAL,
         )
     }

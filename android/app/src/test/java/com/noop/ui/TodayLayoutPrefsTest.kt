@@ -23,11 +23,11 @@ class TodayLayoutPrefsTest {
         val reordered = listOf(
             TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.YOUR_CARDS,
             TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
-            TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
+            TodaySection.WORKOUTS, TodaySection.JOURNAL,
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
         assertEquals(
-            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal",
+            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,journal",
             encoded,
         )
         assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
@@ -35,16 +35,18 @@ class TodayLayoutPrefsTest {
 
     /** The v1 upgrade path: an order saved by the FIRST cut (6 sections — no hero/liveSession, which were
      *  pinned then) must surface the two new sections at the TOP (their default position), not teleport
-     *  them to the bottom of the user's saved order. */
+     *  them to the bottom of the user's saved order. The saved string also carries the RETIRED
+     *  "recoveryVitals" token (merged into HEART_RATE) — a real backward-compat shape for anyone who
+     *  customised Today before the merge — which must be dropped silently rather than crash. */
     @Test
-    fun decode_savedOrderFromFirstCut_insertsHeroAndSessionAtTheirDefaultPosition() {
+    fun decode_savedOrderFromFirstCut_insertsHeroAndSessionAtDefaultPosition_dropsRetiredRecoveryVitalsToken() {
         val firstCut = "synthesis,keyMetrics,workouts,heartRate,recoveryVitals,yourCards"
         assertEquals(
             listOf(
                 TodaySection.HERO, TodaySection.LIVE_SESSION,
                 TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
-                TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.YOUR_CARDS,
-                // journal(8) follows everything saved → appended:
+                TodaySection.HEART_RATE, TodaySection.YOUR_CARDS,
+                // journal(7) follows everything saved → appended:
                 TodaySection.JOURNAL,
             ),
             TodayLayoutPrefs.decodeOrder(firstCut),
@@ -55,6 +57,7 @@ class TodayLayoutPrefsTest {
     fun decode_insertsAnyMissingSectionAtItsDefaultPositionRelativeToSaved_neverHides() {
         // A saved order that omits WORKOUTS + YOUR_CARDS (and the newer hero/liveSession) must still
         // surface all of them, each before the first saved section that follows it in the default order.
+        // The retired "recoveryVitals" token is dropped like any other unknown token.
         val partial = "heartRate,synthesis,keyMetrics,recoveryVitals"
         val decoded = TodayLayoutPrefs.decodeOrder(partial)
         assertEquals(TodaySection.entries.size, decoded.size)
@@ -64,8 +67,7 @@ class TodayLayoutPrefsTest {
                 // insert before the saved heartRate, in default order among themselves:
                 TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.WORKOUTS,
                 TodaySection.HEART_RATE, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
-                TodaySection.RECOVERY_VITALS,
-                // yourCards(7) then journal(8) follow everything saved → appended in default order:
+                // yourCards(6) then journal(7) follow everything saved → appended in default order:
                 TodaySection.YOUR_CARDS, TodaySection.JOURNAL,
             ),
             decoded,
@@ -79,12 +81,12 @@ class TodayLayoutPrefsTest {
         assertEquals(TodaySection.entries.size, decoded.size)
         assertEquals(
             listOf(
-                // Every missing section's default index precedes yourCards(7), so each inserts before it,
+                // Every missing section's default index precedes yourCards(6), so each inserts before it,
                 // accumulating in default order; the saved yourCards→heartRate order is preserved at the end.
                 TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS,
-                TodaySection.KEY_METRICS, TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS,
+                TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
                 TodaySection.YOUR_CARDS, TodaySection.HEART_RATE,
-                // journal(8) follows everything → appended last:
+                // journal(7) follows everything → appended last:
                 TodaySection.JOURNAL,
             ),
             decoded,
@@ -105,11 +107,13 @@ class TodayLayoutPrefsTest {
 
     @Test
     fun visibleOrder_filtersHiddenWithoutChangingSavedOrder() {
+        // Carries the retired "recoveryVitals" token alongside every current section — the dead token is
+        // dropped, and the round-trip below proves it doesn't disturb the other 8 sections' order.
         val order = "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal"
         assertEquals(
             listOf(
                 TodaySection.HEART_RATE, TodaySection.YOUR_CARDS, TodaySection.LIVE_SESSION,
-                TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.RECOVERY_VITALS,
+                TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
                 TodaySection.JOURNAL,
             ),
             TodayLayoutPrefs.visibleOrder(order, "hero,workouts"),
@@ -139,10 +143,12 @@ class TodayLayoutPrefsTest {
         val raws = TodaySection.entries.map { it.raw }
         assertEquals("raw keys must be unique (they're the persisted identity)", raws.size, raws.toSet().size)
         // Pin the exact wire strings — they cross the .noopbak boundary and must match macOS byte-for-byte.
+        // "recoveryVitals" is retired (merged into "heartRate") and intentionally absent here; decode still
+        // accepts and silently drops that token from an old saved order (see the tests above).
         assertEquals(
             listOf(
                 "hero", "liveSession", "synthesis", "keyMetrics",
-                "workouts", "heartRate", "recoveryVitals", "yourCards", "journal",
+                "workouts", "heartRate", "yourCards", "journal",
             ),
             raws,
         )
