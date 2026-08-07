@@ -104,7 +104,10 @@ val DarkTokens = PaletteTokens(
     recovery000 = Color(0xFFE0463C), recovery030 = Color(0xFFE8743C), recovery055 = Color(0xFFF9DF4A),
     recovery078 = Color(0xFF8FD86A), recovery100 = Color(0xFF03E095),
     strain000 = Color(0xFF9C5A14), strain033 = Color(0xFFC2762A), strain066 = Color(0xFFD98A3D), strain100 = Color(0xFFF0A85A),
-    sleepAwake = Color(0xFFC2CCDA), sleepLight = Color(0xFF4A90E2), sleepDeep = Color(0xFF2F6FCB), sleepREM = Color(0xFF6FA8E8),
+    // Stage colors (2026-08): Deep/REM/Light were three near-identical blues, hard to tell apart in a
+    // stacked bar. Deep now a proper navy, REM a purple (both hex values already used by the ClassicDark
+    // ramp below), Awake the existing warning amber instead of a fourth blue-family tone. Light unchanged.
+    sleepAwake = Color(0xFFF0A020), sleepLight = Color(0xFF4A90E2), sleepDeep = Color(0xFF2A4C8F), sleepREM = Color(0xFF8E6FD6),
     zone1 = Color(0xFF4A90E2), zone2 = Color(0xFF3FA9C9), zone3 = Color(0xFFE8B84B), zone4 = Color(0xFFD98A3D), zone5 = Color(0xFFE0662F),
     statusPositive = Color(0xFF03E095), statusWarning = Color(0xFFF0A020), statusCritical = Color(0xFFE0662F),
     metricCyan = Color(0xFF3FA9C9), metricPurple = Color(0xFF4A90E2), metricAmber = Color(0xFFD98A3D), metricRose = Color(0xFFE0662F),

@@ -12,8 +12,6 @@ import kotlin.math.roundToInt
 internal fun pct(minutes: Double, total: Double): Int =
     if (total > 0.0) (minutes / total * 100.0).roundToInt() else 0
 
-internal fun pctValue(v: Double?): String = v?.let { "${it.roundToInt()}%" } ?: "—"
-
 /** "+12% vs typical" / "−0.4 rpm vs typical" — the latest-vs-mean caption every tile carries. */
 internal fun vsTypical(latest: Double?, typical: Double?, suffix: String, decimals: Int = 0): String {
     if (latest == null || typical == null || typical == 0.0) return "vs typical - "
@@ -22,18 +20,6 @@ internal fun vsTypical(latest: Double?, typical: Double?, suffix: String, decima
     val mag = abs(diff)
     val num = if (decimals == 0) "${mag.roundToInt()}" else String.format(java.util.Locale.US, "%.${decimals}f", mag)
     return "$sign$num$suffix vs typical"
-}
-
-internal fun debtCaption(debt: Double?): String {
-    if (debt == null) return "vs need"
-    return if (debt < 15.0) "On target" else "Below need"
-}
-
-internal fun debtColor(debt: Double?): Color = when {
-    debt == null -> Palette.textPrimary
-    debt < 15.0 -> Palette.statusPositive
-    debt < 60.0 -> Palette.statusWarning
-    else -> Palette.statusCritical
 }
 
 // MARK: - Sleep-debt ledger formatting (mirror SleepView.swift)

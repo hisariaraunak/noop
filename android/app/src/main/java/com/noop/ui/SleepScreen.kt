@@ -5,8 +5,6 @@ import androidx.compose.ui.res.stringResource
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.Toast
-import com.noop.analytics.SleepMark
-import com.noop.analytics.SleepMarkType
 import com.noop.analytics.SleepWindowReclip
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -29,12 +27,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -332,6 +337,12 @@ fun SleepScreen(
         }
     }
 
+    // Secondary Insights / Historical Trends disclosures (IA cleanup, 2026-08): collapsed by default so
+    // the primary scroll stays to Tonight + the headline Metrics grid; NOT persisted, same as every other
+    // "starts collapsed" state in this app (Key Metrics overflow, Data Sources detail before it retired).
+    var secondaryExpanded by remember { mutableStateOf(false) }
+    var historyExpanded by remember { mutableStateOf(false) }
+
     // Tapping a metric tile opens a full-history detail sheet for that one metric. (PR #260)
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var detailMetricKey by remember { mutableStateOf<String?>(null) }
@@ -503,25 +514,6 @@ fun SleepScreen(
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            // SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
-            // a mark is persisted to the `sleep_mark` series + the shareable strap log; it never
-            // changes the detected sleep. Mirrors macOS SleepView.sleepMarkCard.
-            item {
-            SleepMarkCard(
-                onMark = { type ->
-                    val mark = SleepMark.now(type)
-                    // The shareable strap log is the human-readable surface in a debug export.
-                    vm.ble.externalLog(mark.logLine())
-                    scope.launch {
-                        runCatching {
-                            vm.repo.upsertMetricSeries(listOf(mark.metricPoint("my-whoop")))
-                        }
-                    }
-                    Toast.makeText(context, mark.confirmation(), Toast.LENGTH_SHORT).show()
-                },
-            )
-            }
-            item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item {
             Hero(
                 display = display,
@@ -614,6 +606,17 @@ fun SleepScreen(
                 windowWakeTs = night?.heroWakeTs,
             )
             }
+            // StagesVsTypical describes ONE specific night's deep/REM/light minutes, so it must read the
+            // SELECTED day's model, never the full-history fallback: when the selected day has no stage
+            // model (the phantom newest day), showing tilesModel here would label ANOTHER day's stages
+            // as this night (#940). Hide the card in that state (iOS shows the stub's honest zeros).
+            // Sits directly under Hero (IA cleanup, 2026-08 — was scrolled far down the page, a separate
+            // "Stages vs typical" card repeating numbers Hero's own stage breakdown already showed).
+            if (model != null) {
+                val selectedModel = model
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                item { StagesVsTypical(selectedModel) }
+            }
             // Tiles / ledger / trends read the FULL-history model (#940): they stay up when only the
             // selected day's model failed to build, exactly as iOS keeps them while browsing.
             if (tilesModel != null) {
@@ -621,82 +624,50 @@ fun SleepScreen(
                 // (a nullable val doesn't smart-cast across a lambda boundary). Same model, same order.
                 val m = tilesModel
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item { MetricGrid(m, onMetricClick = { detailMetricKey = it }) }
+                item { SleepMetricsGrid(m, onMetricClick = { detailMetricKey = it }) }
+
+                // SECONDARY INSIGHTS (2026-08 IA cleanup) — Restorative + Respiratory, folded behind a
+                // disclosure so the primary scroll stays to the four headline metrics above.
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                // Rest's own trend, folded in from the now-retired vital_detail/rest (2026-08): Sleep
-                // already owned everything else in this domain (hypnogram, debt, Smart Alarm), this was
-                // the one gap. Its own item{} (not inside the "Rest" tile's tap-through sheet above) so
-                // it's visible without an extra tap, matching how Effort/Charge fold their trends in.
-                item { RestTrendCard(vm) }
-                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item { SleepDebtLedgerCard(m.sleepDebtLedger) }
-                // StagesVsTypical describes ONE specific night's deep/REM/light minutes under the
-                // "Selected night" header, so it must read the SELECTED day's model, never the
-                // full-history fallback: when the selected day has no stage model (the phantom newest
-                // day), showing tilesModel here would label ANOTHER day's stages as this night (#940).
-                // Hide the card in that state (iOS shows the stub's honest zeros); MetricGrid/ledger/
-                // trends above/below stay on the full-history tilesModel exactly as before.
-                if (model != null) {
-                    // Bind a non-null local so the smart-cast carries into the item {} lambda.
-                    val selectedModel = model
-                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                    item { StagesVsTypical(selectedModel) }
+                item {
+                    ExpandableSectionHeader(
+                        title = "Secondary Insights",
+                        overline = "Deeper look",
+                        expanded = secondaryExpanded,
+                        onToggle = { secondaryExpanded = !secondaryExpanded },
+                    )
                 }
-                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item { DurationTrend(m) }
-                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item { HoursVsNeededCard(m) }
-                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item { SleepConsistencyCard(sleeps, habitualMidsleep) }
-            }
-        }
-    }
-}
+                if (secondaryExpanded) {
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { SleepSecondaryInsights(m, onMetricClick = { detailMetricKey = it }) }
+                }
 
-// MARK: - 0b. SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1)
-//
-// A compact additive card with two buttons. Tapping reports the chosen mark up to [onMark], which the
-// screen persists to the `sleep_mark` metric series AND appends to the shareable strap log, then
-// confirms with a Toast. LOGGING ONLY: a mark never touches the sleep detector or the night boundaries
-// on this screen; it's a record for later tap-driven sleep bounds + calibration. Mirrors macOS
-// SleepView.sleepMarkCard.
-
-@Composable
-private fun SleepMarkCard(onMark: (SleepMarkType) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0), overline = "Tap to log", trailing = "Phase 1")
-        NoopCard(tint = Palette.restColor) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    uiString(R.string.l10n_sleep_screen_tap_when_you_re_heading_to_1f401690),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                    Button(
-                        onClick = { onMark(SleepMarkType.BEDTIME) },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = uiString(R.string.l10n_sleep_screen_log_going_to_sleep_6c2b519d) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.surfaceInset,
-                            contentColor = Palette.textPrimary,
-                        ),
-                    ) {
-                        Icon(Icons.Filled.Bedtime, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(uiString(R.string.l10n_sleep_screen_going_to_sleep_9c6c63fd), style = NoopType.subhead)
-                    }
-                    Button(
-                        onClick = { onMark(SleepMarkType.WAKE) },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = uiString(R.string.l10n_sleep_screen_log_waking_up_2f9c230e) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.surfaceInset,
-                            contentColor = Palette.textPrimary,
-                        ),
-                    ) {
-                        Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(uiString(R.string.l10n_sleep_screen_i_m_awake_2caf0e7f), style = NoopType.subhead)
-                    }
+                // HISTORICAL TRENDS (2026-08 IA cleanup) — everything multi-night: Rest trend, the hours-
+                // asleep trend, the sleep-debt ledger, hours-vs-needed, and bedtime/wake consistency. Also
+                // folded behind a disclosure — same reasoning as Secondary Insights.
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                item {
+                    ExpandableSectionHeader(
+                        title = "Historical Trends",
+                        overline = "History",
+                        expanded = historyExpanded,
+                        onToggle = { historyExpanded = !historyExpanded },
+                    )
+                }
+                if (historyExpanded) {
+                    // Rest's own trend, folded in from the now-retired vital_detail/rest (2026-08): Sleep
+                    // already owned everything else in this domain (hypnogram, debt, Smart Alarm), this
+                    // was the one gap. Matches how Effort/Charge fold their trends in.
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { RestTrendCard(vm) }
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { DurationTrend(m) }
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { SleepDebtLedgerCard(m.sleepDebtLedger) }
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { HoursVsNeededCard(m) }
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { SleepConsistencyCard(sleeps, habitualMidsleep) }
                 }
             }
         }
@@ -2189,98 +2160,153 @@ private fun NightNavHeader(
     }
 }
 
-// MARK: - 2. Metric grid (row-equalized min-height tiles, each with a bottom sparkline)
+// MARK: - Expandable section disclosure (IA cleanup, 2026-08)
 
+/** The tappable header row for a collapsed-by-default section: overline + title, a chevron that flips
+ *  with the state. Tapping toggles in place — no navigation, no sheet. The content itself is the
+ *  caller's own `item{}`s, conditionally emitted right after this header in the same LazyColumn, so
+ *  collapsing a section really does stop composing/measuring its content rather than just hiding it. */
 @Composable
-private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
-    val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { mod ->
-            SparkTile(
-                mod, "Rest",
-                value = pctValue(m.performance.latest),
-                caption = vsTypical(m.performance.latest, m.performance.typical, "%"),
-                accent = m.performance.latest?.let { Palette.recoveryColor(it) } ?: Palette.textPrimary,
-                spark = m.performance.series, sparkColor = Palette.restColor,
-                onClick = { onMetricClick("performance") },
+private fun ExpandableSectionHeader(
+    title: String,
+    overline: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                onClickLabel = if (expanded) "Collapse $title" else "Expand $title",
+                onClick = onToggle,
             )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Efficiency",
-                value = pctValue(m.efficiency.latest),
-                caption = vsTypical(m.efficiency.latest, m.efficiency.typical, "%"),
-                accent = Palette.statusPositive,
-                spark = m.efficiency.series, sparkColor = Palette.statusPositive,
-                onClick = { onMetricClick("efficiency") },
-            )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Consistency",
-                value = pctValue(m.consistency.latest),
-                caption = vsTypical(m.consistency.latest, m.consistency.typical, "%"),
-                accent = m.consistency.latest?.let { Palette.recoveryColor(it) } ?: Palette.textPrimary,
-                spark = m.consistency.series, sparkColor = Palette.metricCyan,
-                onClick = { onMetricClick("consistency") },
-            )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Hours vs Needed",
-                value = pctValue(m.hoursVsNeeded.latest),
-                caption = vsTypical(m.hoursVsNeeded.latest, m.hoursVsNeeded.typical, "%"),
-                accent = m.hoursVsNeeded.latest?.let { Palette.recoveryColor(minOf(100.0, it)) } ?: Palette.textPrimary,
-                spark = m.hoursVsNeeded.series, sparkColor = Palette.restColor,
-                onClick = { onMetricClick("hours_vs_needed") },
-            )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Restorative",
-                value = pctValue(m.restorative.latest),
-                caption = vsTypical(m.restorative.latest, m.restorative.typical, "%"),
-                accent = Palette.sleepREM,
-                spark = m.restorative.series, sparkColor = Palette.sleepREM,
-                onClick = { onMetricClick("restorative") },
-            )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Respiratory",
-                value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
-                caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
-                accent = Palette.metricPurple,
-                spark = m.respiratory.series, sparkColor = Palette.metricPurple,
-                onClick = { onMetricClick("respiratory") },
-            )
-        },
-    )
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Overline(overline)
+            Text(title, style = NoopType.title2, color = Palette.textPrimary)
+        }
+        Icon(
+            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+        )
+    }
+}
 
+// MARK: - 2. Metric grid — the shared MetricTile (Components.kt), 2026-08 restyle
+
+/** Rest/Efficiency/Consistency/Hours-vs-Needed as the shared [MetricTile] grid — the same tile design
+ *  Today's Key Metrics and Health's Recovery Vitals use, replacing the old sparkline-based SparkTile
+ *  grid for visual consistency across the app. Sleep Debt is deliberately NOT a tile here anymore: it's
+ *  the same number the Sleep-debt ledger already shows (as a more useful running balance), so a third
+ *  surface for it here was pure duplication. Restorative/Respiratory moved to Secondary Insights. */
+@Composable
+private fun SleepMetricsGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
+    val tiles = listOf(
+        MetricTileStyle(Icons.Filled.Bedtime, Palette.restColor) to
+            pctReading("Rest", m.performance, onMetricClick = { onMetricClick("performance") }),
+        MetricTileStyle(Icons.Filled.Speed, Palette.statusPositive) to
+            pctReading("Efficiency", m.efficiency, onMetricClick = { onMetricClick("efficiency") }),
+        MetricTileStyle(Icons.Filled.Schedule, Palette.metricCyan) to
+            pctReading("Consistency", m.consistency, onMetricClick = { onMetricClick("consistency") }),
+        MetricTileStyle(Icons.Filled.HourglassBottom, Palette.restColor) to
+            pctReading("Hours vs Needed", m.hoursVsNeeded, onMetricClick = { onMetricClick("hours_vs_needed") }),
+    )
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Night detail", overline = "Metrics", trailing = "vs typical")
-
-        // Sleep Debt is the actionable summary for the section, so it leads at the full
-        // two-column width. The remaining six peer metrics keep the established 2 × 3 grid.
-        SparkTile(
-            Modifier.fillMaxWidth(), "Sleep Debt",
-            value = m.sleepDebt.latest?.let { durationText(it) } ?: "—",
-            caption = debtCaption(m.sleepDebt.latest),
-            accent = debtColor(m.sleepDebt.latest),
-            spark = m.sleepDebt.series, sparkColor = Palette.metricRose,
-            onClick = { onMetricClick("sleep_debt") },
-        )
-
-        // Two-up rows; IntrinsicSize.Max + fillMaxHeight keep row neighbors equal height even when
-        // large font scales grow one tile past the tileHeight floor. No empty cells.
-        tiles.chunked(2).forEach { rowTiles ->
+        tiles.chunked(2).forEach { row ->
             Row(
                 modifier = Modifier.height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
             ) {
-                rowTiles.forEach { it(Modifier.weight(1f).fillMaxHeight()) }
+                row.forEach { (style, reading) ->
+                    MetricTile(
+                        label = reading.label,
+                        style = style,
+                        value = reading.value,
+                        unit = reading.unit,
+                        caption = reading.caption,
+                        deltaPct = reading.deltaPct,
+                        fillFraction = reading.fillFraction,
+                        onClick = reading.onClick,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
             }
         }
     }
+}
+
+/** Restorative + Respiratory, folded behind Secondary Insights (2026-08) — same [MetricTile] design,
+ *  moved out of the primary grid since they're a deeper look than the headline four. */
+@Composable
+private fun SleepSecondaryInsights(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
+    Row(
+        modifier = Modifier.height(IntrinsicSize.Max),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
+    ) {
+        val restorative = pctReading("Restorative", m.restorative, onMetricClick = { onMetricClick("restorative") })
+        MetricTile(
+            label = restorative.label,
+            style = MetricTileStyle(Icons.Filled.AutoAwesome, Palette.sleepREM),
+            value = restorative.value,
+            unit = restorative.unit,
+            caption = restorative.caption,
+            deltaPct = restorative.deltaPct,
+            fillFraction = restorative.fillFraction,
+            onClick = restorative.onClick,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
+        val respValue = m.respiratory.latest
+        MetricTile(
+            label = "Respiratory",
+            style = MetricTileStyle(Icons.Filled.Air, Palette.metricPurple),
+            value = respValue?.let { String.format(Locale.US, "%.1f", it) },
+            unit = "rpm",
+            caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
+            // No delta arrow: the arrow badge is "%"-suffixed, which would misstate an rpm delta.
+            deltaPct = null,
+            fillFraction = ((respValue ?: 0.0) / 24.0).coerceIn(0.0, 1.0),
+            onClick = { onMetricClick("respiratory") },
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
+    }
+}
+
+private data class TileReading(
+    val label: String,
+    val value: String?,
+    val unit: String,
+    val caption: String?,
+    val deltaPct: Double?,
+    val fillFraction: Double,
+    val onClick: () -> Unit,
+)
+
+/** A 0–100(+) percentage [Metric] (Rest/Efficiency/Consistency/Hours-vs-Needed/Restorative all share
+ *  this shape) as [MetricTile] primitives: value + "%" unit, [vsTypical]'s caption reused verbatim, the
+ *  delta arrow fed the SAME latest-minus-typical point difference the caption already states, and the
+ *  fill fraction reading the percentage directly (capped at 1.0 — Hours-vs-Needed can read past 100%). */
+private fun pctReading(label: String, metric: Metric, onMetricClick: () -> Unit): TileReading {
+    val deltaPct = if (metric.latest != null && metric.typical != null && metric.typical != 0.0) {
+        metric.latest - metric.typical
+    } else {
+        null
+    }
+    return TileReading(
+        label = label,
+        value = metric.latest?.roundToInt()?.toString(),
+        unit = "%",
+        caption = vsTypical(metric.latest, metric.typical, "%"),
+        deltaPct = deltaPct,
+        fillFraction = ((metric.latest ?: 0.0) / 100.0).coerceIn(0.0, 1.0),
+        onClick = onMetricClick,
+    )
 }
 
 // MARK: - 2b. Sleep-debt ledger (rolling 14-night running balance)
@@ -2551,6 +2577,10 @@ private fun RestTrendCard(vm: AppViewModel) {
     }
 }
 
+/** Hours-asleep trend only (2026-08): used to carry a second "Sleep debt per day" ChartCard too, but
+ *  that was the same per-night deltas the Sleep-debt ledger already shows (as a more useful running
+ *  balance) — a third surface for the same number, cut for the same reason the Night-detail debt tile
+ *  was cut. */
 @Composable
 private fun DurationTrend(m: SleepModel) {
     val pts = m.trendHours
@@ -2587,40 +2617,6 @@ private fun DurationTrend(m: SleepModel) {
                         // #691: on tap, show the DATE alongside the value (the shared chart's tooltip),
                         // matching the other trend graphs. trendDates is index-aligned with the values.
                         selectionLabels = m.trendDates.map(::shortDayLabel),
-                    )
-                    DateAxisRow(m.trendDates)
-                }
-            } else {
-                TrendPlaceholder()
-            }
-        }
-
-        ChartCard(
-            title = uiString(R.string.l10n_sleep_screen_sleep_debt_3aec7d9c),
-            subtitle = "Sleep debt per day",
-            // #691: sleep debt is usually well under an hour, so decimal hours ("0.6h") reads badly —
-            // show hours+minutes. trendDebtHours is in hours; durationText takes minutes.
-            trailing = m.trendDebtHours.lastOrNull()?.let { durationText(it * 60.0) },
-            tint = Palette.restColor,
-            footer = {
-                ChartFooter(
-                    listOf(
-                        "Avg" to (m.trendDebtHours.sleepAverageOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
-                        "Max" to (m.trendDebtHours.maxOrNull()?.let { durationText(it * 60.0) } ?: "â€”"),
-                        "Days" to "${m.trendDebtHours.size}",
-                    ),
-                )
-            },
-        ) {
-            if (m.trendDebtHours.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BarChart(
-                        values = m.trendDebtHours,
-                        modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight)
-                            .semantics { contentDescription = uiString(R.string.l10n_sleep_screen_sleep_debt_trend_chart_9e178776) },
-                        color = Palette.metricRose,
-                        selectionEnabled = true,
-                        selectionLabels = m.trendDates.map(::shortDayLabel),   // #691: hover shows date + value
                     )
                     DateAxisRow(m.trendDates)
                 }
@@ -2739,73 +2735,6 @@ private fun ChartFooter(items: List<Pair<String, String>>) {
     }
 }
 
-// MARK: - SparkTile (min-height metric tile, stacked: value + caption over a full-width 30-day sparkline)
-
-@Composable
-private fun SparkTile(
-    modifier: Modifier,
-    label: String,
-    value: String,
-    caption: String?,
-    accent: Color,
-    spark: List<Double>,
-    sparkColor: Color,
-    onClick: (() -> Unit)? = null,
-) {
-    // liquidPress on the tappable tile: it settles inward on press (the pilot's card feel). The SAME
-    // interactionSource drives the clickable + the press; indication = null so only the liquid settle shows.
-    val interaction = remember { MutableInteractionSource() }
-    // heightIn (not height): tileHeight is a floor, matching the Swift StatTile. At normal font scale the
-    // tile keeps its 108dp footprint; at large font scales it grows instead of clipping the caption. (#squish)
-    val clickMod = if (onClick != null) {
-        modifier
-            .heightIn(min = Metrics.tileHeight)
-            .liquidPress(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-    } else {
-        modifier.heightIn(min = Metrics.tileHeight)
-    }
-    NoopCard(modifier = clickMod, padding = Metrics.space14) {
-        // fillMaxHeight so the weight-spacer can pin the sparkline to the card bottom once the
-        // MetricGrid row bounds the height (Row height(IntrinsicSize.Max) + tile fillMaxHeight()).
-        Column(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
-            Overline(label)
-            Text(
-                value,
-                style = NoopType.tileValue,
-                color = accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (caption != null) {
-                Text(
-                    caption,
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                    // Full card width now, so the "-3% vs typical" caption fits; ellipsis stays as a
-                    // safety net for extreme localized strings.
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = Metrics.space2),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            val tail = spark.takeLast(30)
-            if (tail.size >= 2) {
-                // Full-width bottom spark. Outer height(sparkHeight) deliberately overrides Sparkline's
-                // internal 28dp default down to the 22dp tile spark (same override SparkTailBox does).
-                Sparkline(
-                    values = tail,
-                    color = sparkColor,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = Metrics.space8)
-                        .height(Metrics.sparkHeight),
-                )
-            }
-        }
-    }
-}
 
 // MARK: - Empty state
 

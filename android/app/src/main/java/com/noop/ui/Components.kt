@@ -46,6 +46,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -72,6 +75,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -81,8 +85,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 // MARK: - Locked component system (ported from StrandDesign/Components.swift + StrandCard.swift)
@@ -553,6 +559,116 @@ fun StatTile(
                 )
             }
         }
+    }
+}
+
+// MARK: - MetricTile (the app's standard small-metric tile, 2026-08)
+
+/** An icon + tint pairing for [MetricTile], kept as one object so callers don't repeat two positional
+ *  args across a grid of tiles. */
+data class MetricTileStyle(val icon: ImageVector, val tint: Color)
+
+/**
+ * The app's standard tile for a grid of same-shaped metrics: an icon + uppercase label with a neutral
+ * trend-delta arrow, a big value + unit, an optional caption line, and a slim [LiquidTube] fill bar.
+ * Originated on Health & Wellness's Recovery Vitals grid (2026-08) as `MetricTile`, tied to that screen's
+ * own `VitalDetailModel`; generalized here to plain primitives so ANY metric grid can reuse the same
+ * design — Today's Key Metrics, Health's Recovery Vitals + Steps, Sleep's Metrics grid, and whatever
+ * comes next. New tile grids should reuse this rather than inventing a new shape, unless there's a
+ * specific reason the metric doesn't fit it (no trend history, a non-numeric value, etc.) — confirm
+ * with the user before diverging.
+ *
+ * The delta arrow is deliberately NEUTRAL-tinted, no green/red good-bad coding: a rising HRV isn't
+ * unambiguously good and a falling resting HR isn't either, so the caller decides the sign story via
+ * [caption], not via arrow colour.
+ */
+@Composable
+fun MetricTile(
+    label: String,
+    style: MetricTileStyle,
+    value: String?,
+    unit: String,
+    caption: String?,
+    deltaPct: Double?,
+    fillFraction: Double,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Column(
+        modifier = modifier
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "See $label's history",
+                onClick = onClick,
+            )
+            .padding(horizontal = 13.dp, vertical = 12.dp)
+            .semantics { contentDescription = "$label, ${value ?: "No data"} $unit".trim() },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(style.icon, contentDescription = null, tint = style.tint, modifier = Modifier.size(13.dp))
+                Text(
+                    label.uppercase(),
+                    style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
+                    color = Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (deltaPct != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Icon(
+                        when {
+                            abs(deltaPct) < 0.5 -> Icons.AutoMirrored.Filled.TrendingFlat
+                            deltaPct > 0 -> Icons.AutoMirrored.Filled.TrendingUp
+                            else -> Icons.AutoMirrored.Filled.TrendingDown
+                        },
+                        contentDescription = null,
+                        tint = Palette.textTertiary,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text("${abs(deltaPct).roundToInt()}%", style = NoopType.caption, color = Palette.textTertiary, maxLines = 1)
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                value ?: "—",
+                style = NoopType.number(22f),
+                color = if (value != null) Palette.textPrimary else Palette.textTertiary,
+                maxLines = 1,
+            )
+            if (unit.isNotEmpty() && value != null) {
+                Text(" $unit", style = NoopType.caption, color = Palette.textSecondary, maxLines = 1)
+            }
+        }
+        if (caption != null) {
+            Text(
+                caption,
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        LiquidTube(
+            frac = fillFraction.coerceIn(0.0, 1.0),
+            tint = style.tint,
+            height = 5.dp,
+            animated = false,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

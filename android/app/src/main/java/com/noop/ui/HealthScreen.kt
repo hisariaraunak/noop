@@ -1984,8 +1984,8 @@ fun VitalDetailScreen(
 /** One recovery vital's icon + tint, matching Today's HeartAndVitalsCard exactly for the three it already
  *  shows (HRV/resting HR/respiratory) and extending the same static-per-vital-hue convention for the two
  *  it doesn't (blood oxygen, skin temperature) — deliberately NOT the value-banded `dashboardCardTint`
- *  used by the Your-Cards dashboard, a different (good/ok/poor) encoding for a different surface. */
-private data class MetricTileStyle(val icon: ImageVector, val tint: Color)
+ *  used by the Your-Cards dashboard, a different (good/ok/poor) encoding for a different surface.
+ *  [MetricTileStyle] itself is the shared Components.kt type — every tile grid in the app uses it. */
 private val METRIC_TILE_STYLE = mapOf(
     "hrv" to MetricTileStyle(Icons.Filled.MonitorHeart, Palette.metricCyan),
     "rhr" to MetricTileStyle(Icons.Filled.Favorite, Palette.metricRose),
@@ -2075,11 +2075,16 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                         horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                     ) {
                         pair.forEach { (key, model) ->
+                            val reading = vitalDetailReading(model)
                             MetricTile(
                                 label = model.title,
                                 style = METRIC_TILE_STYLE.getValue(key),
-                                model = model,
-                                onOpenFull = { onOpenVital(key) },
+                                value = reading.value,
+                                unit = reading.unit,
+                                caption = reading.caption,
+                                deltaPct = reading.deltaPct,
+                                fillFraction = reading.fillFraction,
+                                onClick = { onOpenVital(key) },
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -2088,11 +2093,16 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                     // Odd tile out (5 items -> a lone last row): spans the full width rather than
                     // stretching to double size or leaving a dead half-row, matching the mockup.
                     val (key, model) = pair.first()
+                    val reading = vitalDetailReading(model)
                     MetricTile(
                         label = model.title,
                         style = METRIC_TILE_STYLE.getValue(key),
-                        model = model,
-                        onOpenFull = { onOpenVital(key) },
+                        value = reading.value,
+                        unit = reading.unit,
+                        caption = reading.caption,
+                        deltaPct = reading.deltaPct,
+                        fillFraction = reading.fillFraction,
+                        onClick = { onOpenVital(key) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -2174,22 +2184,12 @@ private fun RecoveryVitalsEditorDialog(
     }
 }
 
-/** One Recovery Vitals tile ("Key Metrics" style, 2026-08): a bordered card, icon + uppercase label with
- *  a trend-direction arrow (today vs the trailing week's average), the value, a "7-day avg" caption, and
- *  a slim [LiquidTube] fill bar — the SAME visual language as Today's Key Metrics grid (`LiquidKeyTile`),
- *  fed a recovery vital instead of a dashboard metric. The delta arrow is deliberately NEUTRAL-tinted, no
- *  green/red good-bad coding — confirmed with the user: a rising HRV isn't unambiguously good and a
- *  falling resting HR isn't either, unlike Steps or Calories. No inline expansion: the whole tile is one
- *  tap target opening the vital's own full page via [onOpenFull]. */
-@Composable
-private fun MetricTile(
-    label: String,
-    style: MetricTileStyle,
-    model: VitalDetailModel,
-    onOpenFull: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val recent = remember(model) { model.points.takeLast(8) }
+/** Derives the shared [MetricTile]'s primitives (today's value, unit, "N-day avg" caption, the
+ *  trend-delta arrow input, and the fill fraction) from a [VitalDetailModel]'s point history — the
+ *  same today-vs-trailing-week-average math the old Health-only MetricTile used inline, now a plain
+ *  function so every [MetricTile] call site here can share it. */
+private fun vitalDetailReading(model: VitalDetailModel): MetricTileReading {
+    val recent = model.points.takeLast(8)
     val today = recent.lastOrNull()?.second
     val priorAvg = recent.dropLast(1).map { it.second }.takeIf { it.isNotEmpty() }?.average()
     val deltaPct = if (today != null && priorAvg != null && priorAvg != 0.0) {
@@ -2197,84 +2197,29 @@ private fun MetricTile(
     } else {
         null
     }
-    val interaction = remember { MutableInteractionSource() }
-
-    Column(
-        modifier = modifier
-            .liquidPress(interaction)
-            .clip(RoundedCornerShape(14.dp))
-            .frostedCardSurface(cornerRadius = 14.dp)
-            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClickLabel = "See $label's history",
-                onClick = onOpenFull,
-            )
-            .padding(horizontal = 13.dp, vertical = 12.dp)
-            .semantics { contentDescription = "$label, ${today?.let { model.format(it) } ?: "No data"} ${model.unit}".trim() },
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Icon(style.icon, contentDescription = null, tint = style.tint, modifier = Modifier.size(13.dp))
-                Text(
-                    label.uppercase(),
-                    style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
-                    color = Palette.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (deltaPct != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Icon(
-                        when {
-                            abs(deltaPct) < 0.5 -> Icons.AutoMirrored.Filled.TrendingFlat
-                            deltaPct > 0 -> Icons.AutoMirrored.Filled.TrendingUp
-                            else -> Icons.AutoMirrored.Filled.TrendingDown
-                        },
-                        contentDescription = null,
-                        tint = Palette.textTertiary,
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text("${abs(deltaPct).roundToInt()}%", style = NoopType.caption, color = Palette.textTertiary, maxLines = 1)
-                }
-            }
-        }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                today?.let { model.format(it) } ?: "—",
-                style = NoopType.number(22f),
-                color = if (today != null) Palette.textPrimary else Palette.textTertiary,
-                maxLines = 1,
-            )
-            if (model.unit.isNotEmpty() && today != null) {
-                Text(" ${model.unit}", style = NoopType.caption, color = Palette.textSecondary, maxLines = 1)
-            }
-        }
-        if (today != null && priorAvg != null) {
-            Text(
-                "7-day avg ${model.format(priorAvg)}${if (model.unit.isNotEmpty()) " ${model.unit}" else ""}",
-                style = NoopType.caption,
-                color = Palette.textTertiary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        LiquidTube(
-            frac = today?.let { metricTileFraction(model.key, it) } ?: 0.0,
-            tint = style.tint,
-            height = 5.dp,
-            animated = false,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    return MetricTileReading(
+        value = today?.let { model.format(it) },
+        unit = model.unit,
+        caption = if (today != null && priorAvg != null) {
+            "7-day avg ${model.format(priorAvg)}${if (model.unit.isNotEmpty()) " ${model.unit}" else ""}"
+        } else {
+            null
+        },
+        deltaPct = deltaPct,
+        fillFraction = today?.let { metricTileFraction(model.key, it) } ?: 0.0,
+    )
 }
+
+/** The plain-primitive bundle the shared [MetricTile] (Components.kt) needs — local to this file since
+ *  it's built from HealthScreen's own [VitalDetailModel]; other screens derive the same five primitives
+ *  from whatever model they own and pass them to [MetricTile] directly. */
+private data class MetricTileReading(
+    val value: String?,
+    val unit: String,
+    val caption: String?,
+    val deltaPct: Double?,
+    val fillFraction: Double,
+)
 
 /** A rough 0..1 visual proportion for the tile's fill bar — NOT a scored/clinical fraction, just enough
  *  to give the bar a sensible fill level. Mirrors the caps the pre-redesign HeroVitalRow used (HRV/120,
@@ -2300,11 +2245,16 @@ private fun HealthStepsSection(vm: AppViewModel, onOpenVital: (String) -> Unit) 
     LaunchedEffect(Unit) { model = buildSeriesVitalDetail(vm, "steps_est") }
     val m = model ?: return
     if (m.points.isEmpty()) return
+    val reading = vitalDetailReading(m)
     MetricTile(
         label = m.title,
         style = METRIC_TILE_STYLE.getValue("steps_est"),
-        model = m,
-        onOpenFull = { onOpenVital("steps_est") },
+        value = reading.value,
+        unit = reading.unit,
+        caption = reading.caption,
+        deltaPct = reading.deltaPct,
+        fillFraction = reading.fillFraction,
+        onClick = { onOpenVital("steps_est") },
         modifier = Modifier.fillMaxWidth(),
     )
 }
