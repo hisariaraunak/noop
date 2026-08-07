@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -1677,7 +1678,13 @@ private val RECOVERY_CHART_KEYS = setOf("recovery", "hrv", "rhr", "resp", "spo2"
 private val RECOVERY_VITAL_RANGES = listOf(VitalDetailRange.WEEK, VitalDetailRange.MONTH, VitalDetailRange.THREE_MONTH)
 
 @Composable
-fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Unit = {}) {
+fun VitalDetailScreen(
+    vm: AppViewModel,
+    key: String,
+    onOpenVital: (String) -> Unit = {},
+    onOpenWorkout: (WorkoutRow) -> Unit = {},
+    onSeeAllWorkouts: () -> Unit = {},
+) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val tempUnit = UnitPrefs.temperature(context)
@@ -1963,7 +1970,13 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
         // plan's scope note: Today's old day-stepper let you browse a past day's HR curve inline; that
         // capability isn't reproduced here, only the common "today" case.
         if (key == "strain") {
-            EffortHeartRateSection(vm = vm, days = days, effortScale = effortScale)
+            EffortHeartRateSection(
+                vm = vm,
+                days = days,
+                effortScale = effortScale,
+                onOpenWorkout = onOpenWorkout,
+                onSeeAllWorkouts = onSeeAllWorkouts,
+            )
         }
     }
 }
@@ -2437,7 +2450,13 @@ internal fun CompactMetricSummaryCard(
  *  the old Today card used (`OverviewHRChart`/`HrWindowPills`/`HrTimeAxisLabels`/`hrChartTransformGestures`,
  *  now `internal` in TodayScreen.kt) so the chart is byte-identical to what Today used to render inline. */
 @Composable
-private fun EffortHeartRateSection(vm: AppViewModel, days: List<DailyMetric>, effortScale: EffortScale) {
+private fun EffortHeartRateSection(
+    vm: AppViewModel,
+    days: List<DailyMetric>,
+    effortScale: EffortScale,
+    onOpenWorkout: (WorkoutRow) -> Unit = {},
+    onSeeAllWorkouts: () -> Unit = {},
+) {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
     val today = remember { logicalDayNow() }
@@ -2490,7 +2509,7 @@ private fun EffortHeartRateSection(vm: AppViewModel, days: List<DailyMetric>, ef
         if (hrWindow == HrWindow.TODAY) buckets else buckets.filter { hrWindowKeeps(it.bucket, hrWindow, now) }
     }
 
-    SectionHeader(title = "Heart Rate", overline = "Today")
+    SectionHeader(title = "Heart Rate")
     if (winBuckets.size < 2) {
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2629,6 +2648,89 @@ private fun EffortHeartRateSection(vm: AppViewModel, days: List<DailyMetric>, ef
     }
 
     EffortZonesSection(hrSamples = hrSamples, hrMax = profile.hrMax)
+    EffortTodaysWorkoutsSection(
+        workouts = workoutsToday,
+        onOpenWorkout = onOpenWorkout,
+        onSeeAllWorkouts = onSeeAllWorkouts,
+    )
+}
+
+/** Today's individual workout sessions, below Heart Rate + Time in zones (2026-08): each row taps
+ *  straight through to that workout's own detail page — the SAME route the Workouts list and Today's
+ *  Latest Workout card use, so this can never disagree with either. "See all workouts" is ALWAYS shown,
+ *  even with zero sessions today, so Effort becomes a second guaranteed path into the Workouts screen,
+ *  independent of Today's own conditional card (which renders nothing without a recent session). */
+@Composable
+private fun EffortTodaysWorkoutsSection(
+    workouts: List<WorkoutRow>,
+    onOpenWorkout: (WorkoutRow) -> Unit,
+    onSeeAllWorkouts: () -> Unit,
+) {
+    SectionHeader(title = "Today's Workouts")
+    if (workouts.isEmpty()) {
+        NoopCard {
+            Text(
+                "No workouts logged today.",
+                style = NoopType.subhead,
+                color = Palette.textTertiary,
+            )
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+            workouts.sortedByDescending { it.startTs }.forEach { w ->
+                EffortWorkoutRow(workout = w, onClick = { onOpenWorkout(w) })
+            }
+        }
+    }
+    Text(
+        "See all workouts",
+        style = NoopType.footnote,
+        color = Palette.accent,
+        textAlign = TextAlign.End,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "See the full Workouts list", onClick = onSeeAllWorkouts)
+            .padding(vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun EffortWorkoutRow(workout: WorkoutRow, onClick: () -> Unit) {
+    val tint = workout.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "See this workout's detail",
+                onClick = onClick,
+            )
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(sportIcon(workout.sport), contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(WorkoutEditing.displaySport(workout.sport), style = NoopType.body, color = Palette.textPrimary)
+            Text(
+                workoutCaption(workout), style = NoopType.footnote, color = Palette.textTertiary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(workoutDuration(workout), style = NoopType.number(14f), color = Palette.textPrimary)
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(16.dp),
+        )
+    }
 }
 
 /** Short name + description per HR zone, straight off the `HrZones.kt` %HRmax band-edge comments (Zone 1
@@ -2653,7 +2755,7 @@ private fun EffortZonesSection(hrSamples: List<HrSample>, hrMax: Int) {
     val timeInZone = remember(hrSamples, zoneSet) { HrZones.timeInZone(hrSamples, zoneSet) }
     val total = timeInZone.total
 
-    SectionHeader(title = "Time in zones", overline = "Today")
+    SectionHeader(title = "Time in zones")
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (total <= 0.0) {

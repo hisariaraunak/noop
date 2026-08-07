@@ -7,9 +7,8 @@ import org.junit.Test
 
 /**
  * A1/S4/S5 parity twins of the iOS TodayChargeTapCollapseTests: the one-word readiness read kept on the
- * hero (#205), the collapsed "Synced from: ..." footer summary (S5), and the metrics-grid overflow cap
- * (S5). These mirror the Swift TodayView.readinessWord / syncedFromSummary / metricsCollapsedCap EXACTLY,
- * so a drift in either platform's labels/numbers fails here.
+ * hero (#205), and the metrics-grid overflow cap (S5). These mirror the Swift TodayView.readinessWord /
+ * metricsCollapsedCap EXACTLY, so a drift in either platform's labels/numbers fails here.
  */
 class TodayChargeTapCollapseTest {
 
@@ -24,55 +23,6 @@ class TodayChargeTapCollapseTest {
     @Test
     fun readinessWord_insufficientHasNoWord() {
         assertNull(readinessWord(ReadinessEngine.Level.INSUFFICIENT))
-    }
-
-    @Test
-    fun syncedFromSummary_listsOnlySourcesWithData() {
-        assertEquals(
-            "Synced from: WHOOP, Apple Watch",
-            syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = false),
-        )
-        assertEquals(
-            "Synced from: WHOOP",
-            syncedFromSummary(hasWhoop = true, hasApple = false, hasXiaomi = false),
-        )
-        assertEquals(
-            "Synced from: WHOOP, Apple Watch, Mi Band",
-            syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = true),
-        )
-    }
-
-    @Test
-    fun syncedFromSummary_appleHealthReadsAsAppleWatch() {
-        assertEquals(
-            "Synced from: Apple Watch",
-            syncedFromSummary(hasWhoop = false, hasApple = true, hasXiaomi = false),
-        )
-    }
-
-    @Test
-    fun syncedFromSummary_healthConnectReadsAsHealthConnect() {
-        // #176: a Health-Connect-only user must NOT see "Synced from: Apple Watch".
-        assertEquals(
-            "Synced from: Health Connect",
-            syncedFromSummary(hasWhoop = false, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
-        )
-        assertEquals(
-            "Synced from: WHOOP, Health Connect",
-            syncedFromSummary(hasWhoop = true, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
-        )
-        assertEquals(
-            "Synced from: WHOOP, Apple Watch, Health Connect",
-            syncedFromSummary(hasWhoop = true, hasApple = true, hasHealthConnect = true, hasXiaomi = false),
-        )
-    }
-
-    @Test
-    fun syncedFromSummary_noSourcesIsHonest() {
-        assertEquals(
-            "No sources yet",
-            syncedFromSummary(hasWhoop = false, hasApple = false, hasXiaomi = false),
-        )
     }
 
     @Test

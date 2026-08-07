@@ -212,13 +212,16 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Insights", R.string.more_group_insights, listOf(
         Destination.Insights, Destination.Coach,
     ), defaultExpanded = true),
-    // IA phase 5 (2026-08): Workouts/Health/Stress/LabBook dropped — each already has an always-on
-    // entry point elsewhere (Today's Workouts/Health/Stress cards; Health & Wellness's own Records &
-    // Sources section links Lab Book). What's left has no standing home outside this drawer: Live only
-    // opens from Today conditionally (an active workout in progress), Breathe is a link-out button on
-    // the Stress screen rather than a persistent card, Intervals/Rhythm have no other entry point at all.
+    // IA phase 5 (2026-08): Health/Stress/LabBook dropped — each has an UNCONDITIONAL entry point
+    // elsewhere (Today's Health/Stress cards; Health & Wellness's own Records & Sources section links Lab
+    // Book). Workouts was dropped too in that pass but restored here (2026-08 follow-up): its Today card
+    // (TodayWorkoutsSection) returns nothing at all when there's no recent workout — the exact same
+    // conditional-entry problem that kept Live in this list, just missed the first time. What's left has
+    // no standing home outside this drawer: Live only opens from Today conditionally (an active workout in
+    // progress), Workouts' Today card is the same story, Breathe is a link-out button on the Stress screen
+    // rather than a persistent card, Intervals/Rhythm have no other entry point at all.
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Breathe, Destination.Intervals, Destination.Rhythm,
+        Destination.Live, Destination.Workouts, Destination.Breathe, Destination.Intervals, Destination.Rhythm,
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
@@ -359,10 +362,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { nav.navigateTopLevel(Destination.Journal.route) },
-                        // The single Latest Workouts tile opens its full detail; "See all workouts" opens the
-                        // list (Today only ever shows the most recent workout now — the rest are one tap away).
+                        // The single Latest Workouts tile opens its full detail (Today only ever shows the
+                        // most recent workout now — the rest are one tap away via the drawer/FAB/Effort).
                         onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
-                        onSeeAllWorkouts = { nav.navigate(Destination.Workouts.route) },
                     )
                 }
                 composable(Destination.Live.route) {
@@ -443,6 +445,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // Recovery's inline vitals accordion (Charge hub, 2026-08) and Health's own Steps
                         // tile (IA phase 3) both open each vital's own full page from here.
                         onOpenVital = { k -> nav.navigate("vital_detail/$k") },
+                        // Effort's Today's Workouts section (2026-08): a workout row opens its own detail
+                        // page, same route Today's Latest Workout card and the Workouts list use.
+                        onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
+                        onSeeAllWorkouts = { nav.navigate(Destination.Workouts.route) },
                     )
                 }
                 // --- v5 pillar screens (Wave 3 wiring) ---

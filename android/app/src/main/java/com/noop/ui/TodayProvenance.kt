@@ -163,20 +163,3 @@ internal fun readinessWord(level: ReadinessEngine.Level): String? = when (level)
     ReadinessEngine.Level.RUNDOWN -> "Rest"
     ReadinessEngine.Level.INSUFFICIENT -> null
 }
-
-/**
- * S5: the collapsed Data Sources footer summary, "Synced from: WHOOP, Apple Watch", listing only sources
- * with data (Apple Health reads as "Apple Watch", the device the audience knows), or "No sources yet".
- * PURE + unit-tested. Twin of the Swift TodayView.syncedFromSummary, plus the Android-only
- * hasHealthConnect source - Health Connect is named for what it is, never folded under "Apple Watch"
- * (issue #176).
- */
-internal fun syncedFromSummary(hasWhoop: Boolean, hasApple: Boolean, hasHealthConnect: Boolean = false, hasXiaomi: Boolean): String {
-    val names = buildList {
-        if (hasWhoop) add("WHOOP")
-        if (hasApple) add("Apple Watch")
-        if (hasHealthConnect) add("Health Connect")
-        if (hasXiaomi) add("Mi Band")
-    }
-    return if (names.isEmpty()) "No sources yet" else "Synced from: " + names.joinToString(", ")
-}

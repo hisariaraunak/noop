@@ -143,7 +143,6 @@ import android.view.HapticFeedbackConstants
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
 import com.noop.analytics.Baselines
-import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.ChargeDriver
 import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
@@ -275,10 +274,11 @@ fun TodayScreen(
     // The #627 journal-reminder card links straight to the journal (Insights). Defaulted to a no-op so
     // the call site stays compiling; AppRoot binds it to nav.navigateTopLevel(Insights), same as Sleep.
     onOpenJournal: () -> Unit = {},
-    // Tapping the single Latest Workouts tile opens its full detail screen; "See all workouts" opens the
-    // Workouts list. Defaulted to no-ops so the call site stays compiling; AppRoot binds both to nav.navigate(...).
+    // Tapping the single Latest Workouts tile opens its full detail screen. Defaulted to a no-op so the
+    // call site stays compiling; AppRoot binds it to nav.navigate(...). Workouts itself (the full list) is
+    // reached via the More drawer, the FAB, and Effort's own Today's Workouts section (2026-08) — Today no
+    // longer carries its own separate "See all workouts" link.
     onOpenWorkout: (WorkoutRow) -> Unit = {},
-    onSeeAllWorkouts: () -> Unit = {},
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -484,52 +484,6 @@ fun TodayScreen(
         viewModel.todayCardsLoadedSig = sig
     }
 
-    // #713, strap battery runtime estimate ("~X left") for the Data-sources battery row. The battery lane
-    // banks a SoC time series; here we read it and run the SHARED BatteryEstimator (the iOS twin computes the
-    // same value off LiveState.batteryEstimate). Rated-life fallback is chosen by strap generation: WHOOP 5/MG
-    // gets the ~12-day figure, WHOOP 4.0 the ~4.5-day one. Recomputed when the banked series grows (a new
-    // reading lands ~every 8 min), when the link comes/goes, or when the strap generation resolves. Charging
-    // hides it (no "X left" while topping up); a too-short discharge run returns null and the badge shows just
-    // the %. Display rule: hours < 48 -> "~Nh left", else "~N days left"; null hides the estimate.
-    var batteryEstimateText by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(liveSnap.connected, liveSnap.batteryPct, liveSnap.whoop5, liveSnap.charging) {
-        batteryEstimateText = if (!liveSnap.connected || liveSnap.charging == true) {
-            null
-        } else {
-            runCatching {
-                val now = System.currentTimeMillis() / 1000
-                // A wide window: SoC readings are sparse (~8 min apart), so a few days back is plenty for the
-                // estimator to find the trailing discharge run and still cheap to load.
-                val from = now - 14L * 86_400
-                val samples = viewModel.repo.batterySamples("my-whoop", from, now, limit = 2_000)
-                    .mapNotNull { s -> s.soc?.let { s.ts to it } }
-                val rated = if (liveSnap.whoop5) BatteryEstimator.ratedLifeHoursWhoop5
-                            else BatteryEstimator.ratedLifeHoursWhoop4
-                // Battery test mode (Test Centre #713): emit the discharge-run / fitted-slope / gate ANALYSIS
-                // trace, not only the per-reading "bank soc=" line. This LaunchedEffect re-runs on a natural
-                // throttle (battery% / connection / charging changes), never a tight loop, and reuses the
-                // samples + rated just loaded, so there is no extra Room read. estimateTrace returns the SAME
-                // Estimate the badge shows, so no displayed number changes. Gated zero-cost when the mode is off
-                // (one SharedPreferences bool read) and routed to the .battery-tagged strap log via externalLog.
-                if (com.noop.testcentre.TestCentre.from(context)
-                        .active(com.noop.testcentre.TestDomain.BATTERY)) {
-                    for (line in BatteryEstimator.estimateTrace(samples, rated).second) {
-                        viewModel.ble.externalLog(line, com.noop.testcentre.TestDomain.BATTERY)
-                    }
-                }
-                BatteryEstimator.estimate(samples, rated)?.let { est ->
-                    val hours = est.hoursRemaining
-                    if (!hours.isFinite() || hours <= 0.0) null
-                    else if (hours < 48) "~${hours.roundToInt()}h left"
-                    else {
-                        val daysLeft = (hours / 24).roundToInt()
-                        "~$daysLeft day${if (daysLeft == 1) "" else "s"} left"
-                    }
-                }
-            }.getOrNull()
-        }
-    }
-
     // #616: ONE calorie definition across the card, the Key-Metrics tile and the detail — resolve per day,
     // IMPORTED-FIRST (the phone's Apple/Health-Connect activeKcal, the figure these surfaces already showed),
     // falling back to NOOP's on-device HR estimate (activeKcalEst) only for days the phone didn't cover.
@@ -625,10 +579,8 @@ fun TodayScreen(
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
     // S5: the Key Metrics grid caps at the first METRICS_COLLAPSED_CAP tiles behind a "Show all metrics"
-    // expander, and the Data Sources footer collapses to a single "Synced from: ..." line. Both default
-    // collapsed and are NOT persisted, so the home screen reopens compact. Mirrors iOS.
+    // expander. Defaults collapsed and is NOT persisted, so the home screen reopens compact. Mirrors iOS.
     var metricsExpanded by remember { mutableStateOf(false) }
-    var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
 
     // Per-card "dismissed into the inbox" flags for the two Today info-cards. A small × on each card
@@ -1175,18 +1127,17 @@ fun TodayScreen(
             // Customize affordance keeps the row and stays on the trailing edge.
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 // One consistent customization affordance for section order and visibility.
-                TextButton(
+                // Icon-only (2026-08): the Tune glyph reads as "filter/adjust" on its own.
+                IconButton(
                     onClick = { showLayoutEditor = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Palette.textTertiary),
                     modifier = Modifier.align(Alignment.CenterEnd),
                 ) {
                     Icon(
                         Icons.Filled.Tune,
                         contentDescription = stringResource(R.string.today_customize_title),
+                        tint = Palette.textTertiary,
                         modifier = Modifier.size(Metrics.iconSmall),
                     )
-                    Spacer(Modifier.width(Metrics.space4))
-                    Text(stringResource(R.string.today_customize_action), style = NoopType.footnote)
                 }
             }
         }
@@ -1503,7 +1454,6 @@ fun TodayScreen(
                             TodayWorkoutsSection(
                                 footer.recentWorkouts,
                                 onOpenWorkout = onOpenWorkout,
-                                onSeeAllWorkouts = onSeeAllWorkouts,
                             )
                         }
                         // HEART RATE & VITALS, merged: the compact tappable HR summary (opens the Effort
@@ -1564,17 +1514,6 @@ fun TodayScreen(
         // toggle is off or there's nothing to suggest. Save → a manual "Workout" row; × → dismissed forever.
         if (selectedDayOffset == 0) {
             item { AutoWorkoutNudgeCard(viewModel = viewModel, days = days) }
-        }
-        // Strap battery only while the link is up AND a real reading exists, a stale % from a
-        // dropped connection must not present as live (#159).
-        item {
-            TodaySourcesSection(
-                footer,
-                strapBatteryPct = if (liveSnap.connected) liveSnap.batteryPct?.roundToInt() else null,
-                strapBatteryEstimate = if (liveSnap.connected) batteryEstimateText else null,
-                expanded = sourcesExpanded,
-                onToggle = { sourcesExpanded = !sourcesExpanded },
-            )
         }
     }
         // Material3's PullToRefreshContainer draws its indicator circle even at rest (progress 0, not
@@ -2972,6 +2911,8 @@ internal fun TodayEditAction(
     onClick: () -> Unit,
     contentAlignment: Alignment = Alignment.Center,
 ) {
+    // Icon-only (2026-08): the Tune glyph reads as "filter/adjust" on its own — a text label beside it
+    // was redundant chrome. Bumped up from 14dp now that the icon carries the affordance alone.
     Box(
         modifier = Modifier
             .height(48.dp)
@@ -2979,23 +2920,12 @@ internal fun TodayEditAction(
             .semantics { this.contentDescription = contentDescription }
             .padding(horizontal = Metrics.space12),
     ) {
-        Row(
-            modifier = Modifier.align(contentAlignment),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.Tune,
-                contentDescription = null,
-                tint = Palette.accent,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(Metrics.space4))
-            Text(
-                uiString(R.string.l10n_today_screen_edit_5301648d).uppercase(Locale.getDefault()),
-                style = NoopType.overline.copy(letterSpacing = 0.4.sp),
-                color = Palette.accent,
-            )
-        }
+        Icon(
+            Icons.Filled.Tune,
+            contentDescription = null,
+            tint = Palette.accent,
+            modifier = Modifier.size(18.dp).align(contentAlignment),
+        )
     }
 }
 
@@ -5270,184 +5200,74 @@ private fun WorkoutGlyph(icon: ImageVector, modifier: Modifier = Modifier) {
 
 // MARK: - Today footer sections
 
+/** A more visual Latest Workout card (2026-08 redesign): a sport-tinted icon chip, sport + date/time,
+ *  an effort fill bar (matching the Key-Metrics tile language elsewhere), duration, and a chevron making
+ *  the tap-through to the workout's own detail page explicit. Drops the separate "See all workouts" text
+ *  link the old StatTile version had below it — Workouts now has three other guaranteed paths (the More
+ *  drawer, the FAB, and Effort's own Today's Workouts section), so repeating it here was redundant chrome. */
 @Composable
 private fun TodayWorkoutsSection(
     workouts: List<WorkoutRow>,
     onOpenWorkout: (WorkoutRow) -> Unit = {},
-    onSeeAllWorkouts: () -> Unit = {},
 ) {
-    // Today shows only the single most recent workout — the full history (incl. anything older) lives
-    // one tap away on the Workouts screen via "See all", so the dashboard stays a glance, not a log.
+    // Today shows only the single most recent workout — the full history (incl. anything older) is one
+    // tap away on the Workouts screen, so the dashboard stays a glance, not a log.
     val latest = lastWorkoutsFeed(workouts).firstOrNull() ?: return
+    val tint = latest.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor
+    val interaction = remember { MutableInteractionSource() }
 
     // "Latest Workouts", not "Last": "Last" read as "final". Mirrored on iOS (TodayView). Lives in
     // strings.xml (values + values-de) so the header is localizable like the nav labels.
     SectionHeader(stringResource(R.string.today_latest_workouts), overline = "Activity")
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        StatTile(
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(16.dp))
+            .frostedCardSurface(cornerRadius = 16.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(16.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "See this workout's detail",
+                onClick = { onOpenWorkout(latest) },
+            )
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onOpenWorkout(latest) },
-            label = WorkoutEditing.displaySport(latest.sport),
-            value = workoutDuration(latest),
-            caption = workoutCaption(latest),
-            accent = latest.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.textPrimary,
-            delta = latest.energyKcal?.let { "${it.roundToInt()} kcal" },
-            deltaColor = Palette.metricAmber,
-        )
-        Text(
-            "See all workouts",
-            style = NoopType.footnote,
-            color = Palette.accent,
-            modifier = Modifier
-                .align(Alignment.End)
-                .clickable(onClick = onSeeAllWorkouts)
-                .padding(vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun TodaySourcesSection(
-    footer: TodayFooterState,
-    strapBatteryPct: Int? = null,
-    strapBatteryEstimate: String? = null,
-    // S5: collapse to a single "Synced from: ..." summary line by default; tapping expands the full
-    // per-source rows + strap battery inline. Nothing is removed, only folded behind a tap.
-    expanded: Boolean = true,
-    onToggle: () -> Unit = {},
-) {
-    SectionHeader("Data Sources", overline = "Provenance")
-    Spacer(Modifier.height(Metrics.gap))
-    val whoopPresent = (footer.whoopDays ?: 0) > 0 || strapBatteryPct != null
-    val applePresent = (footer.appleDays ?: 0) > 0 || (footer.appleWorkouts ?: 0) > 0
-    val hcPresent = (footer.hcDays ?: 0) > 0 || (footer.hcWorkouts ?: 0) > 0
-    if (!expanded) {
-        // Collapsed: one tappable "Synced from: ..." line. Each source is named for what it is —
-        // Health Connect must NOT fold under "Apple Watch" (issue #176: Health-Connect-only users
-        // saw "Synced from: Apple Watch"); the expanded card lists every source by name too.
-        val collapsedInteraction = remember { MutableInteractionSource() }
-        NoopCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .liquidPress(collapsedInteraction)
-                .clickable(
-                    interactionSource = collapsedInteraction,
-                    indication = null,
-                    onClickLabel = "Show what NOOP is synced from",
-                    onClick = onToggle,
-                ),
+                .size(44.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(tint.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    syncedFromSummary(hasWhoop = whoopPresent, hasApple = applePresent, hasHealthConnect = hcPresent, hasXiaomi = false),
-                    style = NoopType.subhead,
-                    color = Palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
+            Icon(sportIcon(latest.sport), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         }
-        return
-    }
-    NoopCard {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // A header row to collapse it back, an obvious "less" cue on the expanded card.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClickLabel = "Hide data source detail", onClick = onToggle),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(uiString(R.string.l10n_today_screen_synced_from_2aa7258b), style = NoopType.overline, color = Palette.textTertiary, modifier = Modifier.weight(1f))
-                Icon(
-                    Icons.Filled.KeyboardArrowUp,
-                    contentDescription = null,
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline))
-            SourceRow(
-                badge = "Whoop",
-                tint = Palette.accent,
-                // A live battery reading means the strap IS connected, even before the first banked
-                // night, don't contradict it with "Not connected" (#159).
-                present = whoopPresent,
-                detail = countDetail(footer.whoopDays, footer.whoopWorkouts, "workouts"),
-                batteryPct = strapBatteryPct,
-                batteryEstimate = strapBatteryEstimate,
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(WorkoutEditing.displaySport(latest.sport), style = NoopType.body, color = Palette.textPrimary)
+            Text(
+                workoutCaption(latest), style = NoopType.footnote, color = Palette.textTertiary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(Palette.hairline),
-            )
-            SourceRow(
-                badge = "Apple Health",
-                tint = Palette.metricCyan,
-                present = applePresent,
-                detail = countDetail(footer.appleDays, footer.appleWorkouts, "workouts"),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(Palette.hairline),
-            )
-            SourceRow(
-                badge = "Health Connect",
-                tint = Palette.metricPurple,
-                present = hcPresent,
-                detail = countDetail(footer.hcDays, footer.hcWorkouts, "workouts"),
+            LiquidTube(
+                frac = (latest.strain?.let { it / StrainScorer.maxStrain } ?: 0.0).coerceIn(0.0, 1.0),
+                tint = tint,
+                height = 5.dp,
+                animated = false,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-    }
-}
-
-@Composable
-private fun SourceRow(
-    badge: String,
-    tint: Color,
-    present: Boolean,
-    detail: String,
-    batteryPct: Int? = null,
-    batteryEstimate: String? = null,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SourceBadge(badge, tint = if (present) tint else Palette.textTertiary)
-        // Compact strap-battery readout beside the source badge, same pill + tone bands as the
-        // Settings Strap section; absent entirely when there's no live reading (#159).
-        batteryPct?.let { pct ->
-            Spacer(Modifier.width(8.dp))
-            StatePill(title = uiString(R.string.l10n_today_screen_pct_ee63e247, pct), tone = batteryPillTone(pct), showsDot = false)
-            // The "~X left" runtime estimate sits beside the %, dimmer, only when we have a trusted one (#713).
-            batteryEstimate?.let { est ->
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = est,
-                    style = NoopType.captionNumber,
-                    color = Palette.textTertiary,
-                    maxLines = 1,
-                )
-            }
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(workoutDuration(latest), style = NoopType.number(16f), color = Palette.textPrimary)
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Palette.textTertiary,
+                modifier = Modifier.size(16.dp),
+            )
         }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (present) detail else "Not connected",
-            style = NoopType.captionNumber,
-            color = if (present) Palette.textSecondary else Palette.textTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -5833,19 +5653,7 @@ private val workoutTimeFmt: DateTimeFormatter =
     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
         .withLocale(Locale.getDefault()).withZone(ZoneId.systemDefault())
 
-private fun countDetail(days: Int?, workouts: Int?, workoutLabel: String): String {
-    if (days == null || workouts == null) return "Counting..."
-    return "${grouped(days)} days · ${grouped(workouts)} $workoutLabel"
-}
-
-/** Same bands as the Settings Strap battery pill, so the % reads the same colour everywhere (#159). */
-private fun batteryPillTone(pct: Int): StrandTone = when {
-    pct <= 15 -> StrandTone.Critical
-    pct <= 30 -> StrandTone.Warning
-    else -> StrandTone.Positive
-}
-
-private fun workoutDuration(row: WorkoutRow): String {
+internal fun workoutDuration(row: WorkoutRow): String {
     val seconds = row.durationS ?: (row.endTs - row.startTs).coerceAtLeast(0L).toDouble()
     if (seconds <= 0.0) return NO_DATA
     val totalMinutes = (seconds / 60.0).roundToInt()
@@ -5857,7 +5665,7 @@ private fun workoutDuration(row: WorkoutRow): String {
 }
 
 /** "d MMM · HH:mm–HH:mm" (#157); start-only when the end isn't after the start (zero/unknown span). */
-private fun workoutCaption(row: WorkoutRow): String {
+internal fun workoutCaption(row: WorkoutRow): String {
     val date = workoutDateFmt.format(Instant.ofEpochSecond(row.startTs))
     val start = workoutTimeFmt.format(Instant.ofEpochSecond(row.startTs))
     return if (row.endTs > row.startTs) {

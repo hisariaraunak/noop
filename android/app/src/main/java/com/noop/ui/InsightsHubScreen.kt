@@ -99,7 +99,10 @@ fun InsightsHubScreen(vm: AppViewModel) {
     // PERF (#707): lazy scaffold — each section (and its standalone Spacer, a real child of the eager
     // `spacedBy(20.dp)` Column) becomes one `item { }`, so the LazyColumn's matching `spacedBy(20.dp)`
     // reproduces identical spacing and only on-screen sections compose + are semantics-walked.
-    LazyScreenScaffold(title = uiString(R.string.l10n_insights_hub_screen_insights_b4510362), subtitle = "Patterns in your own data: association, not cause.") {
+    // Title matches the nav card that opens this screen from the Insights hub (IA phase 4/6, 2026-08) —
+    // was "Insights", the same word as the hub's own screen title one tap up, with nothing to tell a user
+    // anything had actually navigated.
+    LazyScreenScaffold(title = "What Moves Your Charge", subtitle = "Patterns in your own data: association, not cause.") {
         if (!state.loaded) {
             item {
             NoopCard {

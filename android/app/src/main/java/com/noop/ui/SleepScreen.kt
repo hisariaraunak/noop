@@ -2501,7 +2501,7 @@ private fun RestTrendCard(vm: AppViewModel) {
         points?.let { filterSleepMetricPoints(it, range) }.orEmpty()
     }
 
-    SectionHeader("Rest trend", overline = "Sleep")
+    SectionHeader("Rest trend")
     if (points == null) {
         NoopCard { TrendPlaceholder() }
         return
@@ -2556,7 +2556,7 @@ private fun DurationTrend(m: SleepModel) {
     val pts = m.trendHours
     val avg = pts.sleepAverageOrNull()
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Trend", overline = "Sleep", trailing = "Last 14 days")
+        SectionHeader("Trend", trailing = "Last 14 days")
         ChartCard(
             title = uiString(R.string.l10n_sleep_screen_hours_asleep_06f68993),
             subtitle = "Per night, trailing 14 days",
