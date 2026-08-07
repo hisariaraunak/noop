@@ -95,7 +95,7 @@ fun CoupledScreen(
     // only strap-DETECTED bouts — a Health-Connect import with auto-detect off read as 0 while the Workouts
     // screen showed it). vm.workouts is the SAME deduped, dismissed-filtered, all-source list the Workouts
     // screen renders; loadWorkouts() isn't triggered by opening Coupled, so kick it here (idempotent,
-    // mirrors InsightsScreen).
+    // mirrors JournalScreen).
     LaunchedEffect(Unit) { vm.loadWorkouts() }
     val allWorkouts by vm.workouts.collectAsStateWithLifecycle()
 

@@ -2388,17 +2388,18 @@ private fun stressBandCaption(value: Double): String = when {
     else -> "High today"
 }
 
-/** One tap-through row: icon, label + one-line caption, a value, a chevron. No existing component fit —
- *  [MetricTile] is a 2-column square tile built for a trend + fill bar, these are single values with no
- *  history to show inline. */
+/** One tap-through row: icon, label + one-line caption, an optional trailing value, a chevron. No
+ *  existing component fit — [MetricTile] is a 2-column square tile built for a trend + fill bar, these
+ *  are single values (or pure navigation, [value] omitted) with no history to show inline. Shared with
+ *  the Insights hub's nav cards (IA phase 4, 2026-08). */
 @Composable
-private fun CompactMetricSummaryCard(
+internal fun CompactMetricSummaryCard(
     icon: ImageVector,
     tint: Color,
     label: String,
-    value: String,
     caption: String,
     onClick: () -> Unit,
+    value: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     Row(
@@ -2423,7 +2424,9 @@ private fun CompactMetricSummaryCard(
             Text(label, style = NoopType.body, color = Palette.textPrimary)
             Text(caption, style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(value, style = NoopType.number(16f), color = tint)
+        if (value != null) {
+            Text(value, style = NoopType.number(16f), color = tint)
+        }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp))
     }
 }

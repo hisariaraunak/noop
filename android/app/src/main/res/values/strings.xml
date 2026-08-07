@@ -22,6 +22,7 @@
     <string name="nav_coach">Coach</string>
     <string name="nav_insights_hub">What Moves You</string>
     <string name="nav_insights">Insights</string>
+    <string name="nav_journal">Journal</string>
     <string name="nav_explore">Explore</string>
     <string name="nav_compare">Compare</string>
     <string name="nav_health">Health</string>

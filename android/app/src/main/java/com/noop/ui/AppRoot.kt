@@ -140,8 +140,13 @@ private enum class Destination(
 
     // Group: Insight
     Coach("coach", R.string.nav_coach, Icons.Filled.AutoAwesome),
+    // Insights (IA phase 4, 2026-08) is now the landing hub — InsightsHub/Intelligence/Explore/Compare
+    // stay their own destinations, reached only via the hub's cards, not the drawer. Journal (the old
+    // Insights screen's content) is reached only via tap-through too (onOpenJournal, the FAB, and the
+    // hub's own Journal card) — deliberately NOT in any [DrawerGroup], same as [CoupledView].
     InsightsHub("insights_hub", R.string.nav_insights_hub, Icons.Filled.Insights),
     Insights("insights", R.string.nav_insights, Icons.Filled.Insights),
+    Journal("journal", R.string.nav_journal, Icons.Filled.Edit),
     Explore("explore", R.string.nav_explore, Icons.Filled.Explore),
     Compare("compare", R.string.nav_compare, Icons.AutoMirrored.Filled.CompareArrows),
 
@@ -202,9 +207,10 @@ private data class DrawerGroup(
 // listed (they're bottom-bar tabs, exactly as on iOS). Android-only screens (Vital Signs, Wake Window,
 // Notifications, Devices) are slotted into the matching iOS group.
 private val drawerGroups: List<DrawerGroup> = listOf(
+    // IA phase 4 (2026-08): InsightsHub/Intelligence/Explore/Compare dropped — reached only via the
+    // Insights hub's own cards now, not the drawer.
     DrawerGroup("Insights", R.string.more_group_insights, listOf(
-        Destination.InsightsHub, Destination.Intelligence, Destination.Coach,
-        Destination.Insights, Destination.Explore, Destination.Compare,
+        Destination.Insights, Destination.Coach,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
         Destination.Live, Destination.Workouts, Destination.Health,
@@ -349,7 +355,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onOpenDevices = { nav.navigateTopLevel(Destination.Devices.route) },
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        onOpenJournal = { nav.navigateTopLevel(Destination.Journal.route) },
                         // The single Latest Workouts tile opens its full detail; "See all workouts" opens the
                         // list (Today only ever shows the most recent workout now — the rest are one tap away).
                         onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
@@ -365,7 +371,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Sleep.route) {
                     SleepScreen(
                         vm = viewModel,
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        onOpenJournal = { nav.navigateTopLevel(Destination.Journal.route) },
                     )
                 }
                 composable(Destination.CoupledView.route) {
@@ -404,7 +410,16 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.Trends.route) { TrendsScreen(viewModel) }
-                composable(Destination.Insights.route) { InsightsScreen(viewModel, onOpenInsightsHub = { nav.navigateTopLevel(Destination.InsightsHub.route) }) }
+                composable(Destination.Insights.route) {
+                    InsightsScreen(
+                        onOpenJournal = { nav.navigate(Destination.Journal.route) },
+                        onOpenInsightsHub = { nav.navigate(Destination.InsightsHub.route) },
+                        onOpenIntelligence = { nav.navigate(Destination.Intelligence.route) },
+                        onOpenExplore = { nav.navigate(Destination.Explore.route) },
+                        onOpenCompare = { nav.navigate(Destination.Compare.route) },
+                    )
+                }
+                composable(Destination.Journal.route) { JournalScreen(viewModel) }
                 composable(Destination.Compare.route) { CompareScreen(viewModel) }
                 composable(Destination.Health.route) {
                     HealthScreen(
@@ -863,7 +878,7 @@ private data class QuickAction(@StringRes val titleRes: Int, val icon: ImageVect
 private val quickActions: List<QuickAction> = listOf(
     QuickAction(R.string.action_live_hr, Destination.Live.icon, Destination.Live.route),
     QuickAction(R.string.action_start_workout, Icons.Filled.FitnessCenter, Destination.Workouts.route),
-    QuickAction(R.string.action_log_journal, Icons.Filled.Edit, Destination.Insights.route),
+    QuickAction(R.string.action_log_journal, Icons.Filled.Edit, Destination.Journal.route),
     QuickAction(R.string.action_breathe, Icons.Filled.Air, Destination.Breathe.route),
 )
 

@@ -327,7 +327,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** #656: a journal day-offset (daysBack; -1 = Tomorrow) the Today journal widget asks the journal
      *  (Insights) to open at, so tapping a SPECIFIC day's bar lands on THAT day instead of always today.
-     *  InsightsScreen consumes it on open and clears it via [requestJournalDay]`(null)`. */
+     *  JournalScreen consumes it on open and clears it via [requestJournalDay]`(null)`. */
     private val _pendingJournalDayOffset = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
     val pendingJournalDayOffset: StateFlow<Long?> = _pendingJournalDayOffset
     fun requestJournalDay(offset: Long?) { _pendingJournalDayOffset.value = offset }
