@@ -2946,8 +2946,16 @@ private fun buildVitalDetail(
         format = { it.roundToInt().toString() },
     )
     "skin" -> {
-        val latest = days.asReversed().asSequence().mapNotNull { it.skinTempDevC }.firstOrNull() ?: return null
-        val absolute = VitalBands.isAbsoluteSkinTemp(latest)
+        // Bug fix (2026-08): used to `return null` here when no day had a skinTempDevC value yet —
+        // unlike every other recovery vital above, which always returns a model (worst case with
+        // empty readings). Since RecoveryVitalsGrid builds its tile list with `.mapNotNull`, that
+        // null silently dropped the WHOLE TILE from the grid (reported: tile vanishes after opening
+        // its detail page and navigating back, most likely a moment where today's row hasn't picked
+        // up a skin-temp reading yet). Default to absolute mode instead so this always renders a
+        // model — an empty-readings day now shows an honest "—" tile like its neighbours, never a
+        // vanishing one.
+        val latest = days.asReversed().asSequence().mapNotNull { it.skinTempDevC }.firstOrNull()
+        val absolute = latest?.let { VitalBands.isAbsoluteSkinTemp(it) } ?: true
         val unit = UnitFormatter.temperatureUnit(tempUnit)
         val format: (Double) -> String = { c ->
             val full = if (absolute) {
