@@ -212,10 +212,13 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Insights", R.string.more_group_insights, listOf(
         Destination.Insights, Destination.Coach,
     ), defaultExpanded = true),
+    // IA phase 5 (2026-08): Workouts/Health/Stress/LabBook dropped — each already has an always-on
+    // entry point elsewhere (Today's Workouts/Health/Stress cards; Health & Wellness's own Records &
+    // Sources section links Lab Book). What's left has no standing home outside this drawer: Live only
+    // opens from Today conditionally (an active workout in progress), Breathe is a link-out button on
+    // the Stress screen rather than a persistent card, Intervals/Rhythm have no other entry point at all.
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Health,
-        Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
-        Destination.Rhythm,
+        Destination.Live, Destination.Breathe, Destination.Intervals, Destination.Rhythm,
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
