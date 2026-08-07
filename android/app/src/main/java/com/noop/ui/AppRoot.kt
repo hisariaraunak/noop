@@ -147,8 +147,9 @@ private enum class Destination(
 
     // Group: Health
     Health("health", R.string.nav_health, Icons.Filled.MonitorHeart),
+    // VitalSigns destination retired (IA phase 3, 2026-08): its day-picker + vitals grid folded
+    // into HealthScreen directly. VitalSignsDetail (vital_detail/{key}) stays — Health still uses it.
     Hydration("hydration", R.string.nav_hydration, Icons.Filled.WaterDrop),
-    VitalSigns("vital_signs", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
     VitalSignsDetail("vital_detail/{key}", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
     LabBook("lab_book", R.string.nav_lab_book, Icons.Filled.HealthAndSafety),
     Rhythm("rhythm", R.string.nav_rhythm, Icons.Filled.MonitorHeart),
@@ -206,7 +207,7 @@ private val drawerGroups: List<DrawerGroup> = listOf(
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Health, Destination.VitalSigns,
+        Destination.Live, Destination.Workouts, Destination.Health,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
         Destination.Rhythm,
     ), defaultExpanded = true),
@@ -411,22 +412,18 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onVitalClick = { nav.navigate("vital_detail/$it") },
                         onOpenLabBook = { nav.navigateTopLevel(Destination.LabBook.route) },
                         onOpenFusedRecord = { nav.navigateTopLevel(Destination.FusedRecord.route) },
+                        onOpenSettings = { nav.navigateTopLevel(Destination.Settings.route) },
+                        onOpenStress = { nav.navigate(Destination.Stress.route) },
+                        onOpenHydration = { nav.navigate(Destination.Hydration.route) },
                     )
                 }
                 composable(Destination.Hydration.route) { HydrationScreen(viewModel) }
-                composable(Destination.VitalSigns.route) {
-                    VitalSignsScreen(
-                        vm = viewModel,
-                        onVitalClick = { nav.navigate("vital_detail/$it") },
-                    )
-                }
                 composable(Destination.VitalSignsDetail.route) { backStackEntry ->
                     VitalDetailScreen(
                         vm = viewModel,
                         key = backStackEntry.arguments?.getString("key").orEmpty(),
-                        // Recovery's inline vitals accordion (Charge hub, 2026-08) still opens each vital's
-                        // own full page from its expanded panel — same destination, same as VitalSignsScreen's
-                        // onVitalClick above.
+                        // Recovery's inline vitals accordion (Charge hub, 2026-08) and Health's own Steps
+                        // tile (IA phase 3) both open each vital's own full page from here.
                         onOpenVital = { k -> nav.navigate("vital_detail/$k") },
                     )
                 }

@@ -269,32 +269,6 @@ internal fun vitalsFor(
     )
 }
 
-internal fun latestVitals(days: List<DailyMetric>, tempUnit: TemperatureUnit): List<Vital> {
-    val emptyByKey = vitalsFor(null, days, tempUnit).associateBy { it.key }
-    return listOf(
-        latestVital("resp", days, tempUnit, emptyByKey) { it.respRateBpm != null },
-        latestVital("spo2", days, tempUnit, emptyByKey) { it.spo2Pct != null },
-        latestVital("spo2raw", days, tempUnit, emptyByKey) { it.spo2Red != null && it.spo2Ir != null },
-        latestVital("rhr", days, tempUnit, emptyByKey) { it.restingHr != null },
-        latestVital("hrv", days, tempUnit, emptyByKey) { it.avgHrv != null },
-        latestVital("skin", days, tempUnit, emptyByKey) { it.skinTempDevC != null },
-    )
-}
-
-private fun latestVital(
-    key: String,
-    days: List<DailyMetric>,
-    tempUnit: TemperatureUnit,
-    emptyByKey: Map<String, Vital>,
-    hasValue: (DailyMetric) -> Boolean,
-): Vital {
-    val row = days.asReversed().firstOrNull(hasValue)
-    return row
-        ?.let { latestRow -> vitalsFor(latestRow, days, tempUnit).firstOrNull { it.key == key } }
-        ?.copy(asOfLabel = asOfLabel(row.day))
-        ?: emptyByKey.getValue(key)
-}
-
 internal fun selectedDayLabel(offset: Int): String = when (offset) {
     0 -> "Today"
     1 -> "Yesterday"

@@ -24,16 +24,19 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Thermostat
@@ -96,6 +99,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.noop.analytics.Baselines
 import com.noop.analytics.HrZones
+import com.noop.analytics.HydrationGoal
+import com.noop.analytics.HydrationStore
 import com.noop.analytics.IllnessSignalEngine
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.V5HealthSignals
@@ -140,12 +145,24 @@ fun HealthScreen(
     onVitalClick: (String) -> Unit = {},
     onOpenLabBook: () -> Unit = {},
     onOpenFusedRecord: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenStress: () -> Unit = {},
+    onOpenHydration: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
     val today by vm.today.collectAsStateWithLifecycle()
     // Full merged daily history — feeds the personal-baseline banding of the vitals grid.
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    // Vital Signs' day-picker, folded in here (IA phase 3, 2026-08): Today/Yesterday/2-days-ago browse
+    // one day's row at a time instead of each vital independently showing its own latest value.
+    var selectedDayOffset by remember { mutableIntStateOf(0) }
+    val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
+    val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
+    val selectedMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
+    val selectedVitals = remember(selectedMetric, days) {
+        selectedMetric?.let { vitalsFor(it, days, UnitPrefs.temperature(context)) }.orEmpty()
+    }
     // v5 skin-temp suite engine results (Cycle / Body clock / Illness heads-up), recomputed each
     // analytics pass and published by the ViewModel. Cycle awareness gates on its opt-in pref.
     val v5Signals by vm.v5Signals.collectAsStateWithLifecycle()
@@ -181,7 +198,7 @@ fun HealthScreen(
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     LazyScreenScaffold(
-        title = uiString(R.string.l10n_health_screen_health_monitor_c4abc3fc),
+        title = "Health & Wellness",
         subtitle = "Live vitals, streamed from the strap.",
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
@@ -204,21 +221,42 @@ fun HealthScreen(
             item { HeartRateSection(vm = vm, hrMax = hrMax) }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item {
-                VitalsSection(
-                    title = uiString(R.string.l10n_health_screen_vital_signs_e7d9e1b1),
-                    overline = "Latest readings",
-                    trailing = null,
-                    vitals = latestVitals(days, UnitPrefs.temperature(LocalContext.current)),
-                    onVitalClick = onVitalClick,
-                    captionMode = VitalCaptionMode.AS_OF,
-                )
+                RecentDaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
             }
+            item {
+                if (selectedMetric == null || selectedVitals.all { it.value == null }) {
+                    DataPendingNote(
+                        title = missingVitalsTitle(selectedDayOffset),
+                        body = "Try Yesterday or 2 days ago from the bar above if the strap or import did not produce a daily vitals snapshot yet.",
+                    )
+                } else {
+                    VitalsSection(
+                        title = uiString(R.string.l10n_health_screen_vital_signs_e7d9e1b1),
+                        overline = selectedDayLabel(selectedDayOffset),
+                        trailing = "as of ${selectedMetric.day}",
+                        vitals = selectedVitals,
+                        onVitalClick = onVitalClick,
+                        footer = false,
+                        captionMode = VitalCaptionMode.RANGE,
+                    )
+                }
+            }
+            // ACTIVITY & BODY (IA phase 3, 2026-08) — Steps and Weight had no home anywhere in the app
+            // before this. Steps gets a real Key-Metrics-style tile (it has trend data); Weight is a
+            // plain value + edit link into Settings (it has no trend — a fabricated sparkline would lie).
+            item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+            item { HealthStepsSection(vm = vm, onOpenVital = onVitalClick) }
+            item { HealthWeightRow(profile = profile, onOpenSettings = onOpenSettings) }
             // FITNESS AGE — the weekly Saturday number from the engine (resting HR + activity vs your
             // age), with an honest readiness checklist behind a tap. Authoritative value comes from the
             // metricSeries the IntelligenceEngine writes; readiness is derived from what this screen sees.
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item { FitnessAgeSection(vm = vm, days = days, profile = profile) }
             item { VitalitySection(vm = vm, days = days, profile = profile) }
+            // STRESS & HYDRATION (IA phase 3, 2026-08) — compact summary cards linking to their own full
+            // screens, rather than duplicating either engine here.
+            item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+            item { HealthStressHydrationSection(vm = vm, profile = profile, onOpenStress = onOpenStress, onOpenHydration = onOpenHydration) }
             // SKIN TEMPERATURE (v5 pillar) — Cycle awareness (opt-in), Body clock + an illness heads-up,
             // each from a pure engine RESULT the ViewModel publishes. A section of Health, never its own
             // destination (umbrella §2.4). Non-clinical observations about your own numbers.
@@ -1121,42 +1159,6 @@ private fun ReadinessRow(item: FitnessReadinessItem) {
 
 private fun yearWord(years: Int): String = if (kotlin.math.abs(years) == 1) "year" else "years"
 
-@Composable
-fun VitalSignsScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
-    val days by vm.recentDays.collectAsStateWithLifecycle()
-    var selectedDayOffset by remember { mutableIntStateOf(0) }
-    val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
-    val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
-    val selectedMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
-    val tempUnit = UnitPrefs.temperature(LocalContext.current)
-    val vitals = remember(selectedMetric, days, tempUnit) {
-        selectedMetric?.let { vitalsFor(it, days, tempUnit) }.orEmpty()
-    }
-
-    ScreenScaffold(
-        title = uiString(R.string.l10n_health_screen_vital_signs_e7d9e1b1),
-        subtitle = "Historical vitals from your cached daily metrics.",
-    ) {
-        RecentDaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
-        if (selectedMetric == null || vitals.all { it.value == null }) {
-            DataPendingNote(
-                title = missingVitalsTitle(selectedDayOffset),
-                body = "Try Yesterday or 2 days ago from the bar above if the strap or import did not produce a daily vitals snapshot yet.",
-            )
-        } else {
-            VitalsSection(
-                title = uiString(R.string.l10n_health_screen_vital_signs_e7d9e1b1),
-                overline = selectedDayLabel(selectedDayOffset),
-                trailing = "as of ${selectedMetric.day}",
-                vitals = vitals,
-                onVitalClick = onVitalClick,
-                footer = false,
-                captionMode = VitalCaptionMode.RANGE,
-            )
-        }
-    }
-}
-
 // MARK: - Heart rate hero (live)
 
 @Composable
@@ -1970,17 +1972,18 @@ fun VitalDetailScreen(vm: AppViewModel, key: String, onOpenVital: (String) -> Un
  *  shows (HRV/resting HR/respiratory) and extending the same static-per-vital-hue convention for the two
  *  it doesn't (blood oxygen, skin temperature) — deliberately NOT the value-banded `dashboardCardTint`
  *  used by the Your-Cards dashboard, a different (good/ok/poor) encoding for a different surface. */
-private data class RecoveryVitalStyle(val icon: ImageVector, val tint: Color)
-private val RECOVERY_VITAL_STYLE = mapOf(
-    "hrv" to RecoveryVitalStyle(Icons.Filled.MonitorHeart, Palette.metricCyan),
-    "rhr" to RecoveryVitalStyle(Icons.Filled.Favorite, Palette.metricRose),
-    "resp" to RecoveryVitalStyle(Icons.Filled.Air, Palette.accent),
-    "spo2" to RecoveryVitalStyle(Icons.Filled.WaterDrop, Palette.metricPurple),
-    "skin" to RecoveryVitalStyle(Icons.Filled.Thermostat, Palette.metricAmber),
+private data class MetricTileStyle(val icon: ImageVector, val tint: Color)
+private val METRIC_TILE_STYLE = mapOf(
+    "hrv" to MetricTileStyle(Icons.Filled.MonitorHeart, Palette.metricCyan),
+    "rhr" to MetricTileStyle(Icons.Filled.Favorite, Palette.metricRose),
+    "resp" to MetricTileStyle(Icons.Filled.Air, Palette.accent),
+    "spo2" to MetricTileStyle(Icons.Filled.WaterDrop, Palette.metricPurple),
+    "skin" to MetricTileStyle(Icons.Filled.Thermostat, Palette.metricAmber),
+    "steps_est" to MetricTileStyle(Icons.AutoMirrored.Filled.DirectionsWalk, Palette.metricCyan),
 )
 
 /** One filterable tile in the Charge screen's Recovery Vitals grid. [key] is the stable persisted
- *  identifier (matches the `vital_detail/<key>` route + [RECOVERY_VITAL_STYLE]'s map key). */
+ *  identifier (matches the `vital_detail/<key>` route + [METRIC_TILE_STYLE]'s map key). */
 private enum class RecoveryVital(val key: String, val title: String) {
     HRV("hrv", "Heart-rate variability"),
     RHR("rhr", "Resting heart rate"),
@@ -2013,7 +2016,7 @@ private object RecoveryVitalsPrefs {
 
 /** The Charge screen's "Recovery vitals" grid (2026-08 tile redesign, replaces the earlier inline
  *  accordion): HRV, resting HR, respiration, blood oxygen and skin temperature — the exact five inputs
- *  the scoring guide already describes as Charge's own — as a 2-column grid of [RecoveryVitalTile]s
+ *  the scoring guide already describes as Charge's own — as a 2-column grid of [MetricTile]s
  *  matching Today's Key Metrics tile style. No inline expansion: the whole tile is one tap target that
  *  opens the vital's own full page via [onOpenVital]. */
 @Composable
@@ -2059,9 +2062,9 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                         horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                     ) {
                         pair.forEach { (key, model) ->
-                            RecoveryVitalTile(
+                            MetricTile(
                                 label = model.title,
-                                style = RECOVERY_VITAL_STYLE.getValue(key),
+                                style = METRIC_TILE_STYLE.getValue(key),
                                 model = model,
                                 onOpenFull = { onOpenVital(key) },
                                 modifier = Modifier.weight(1f),
@@ -2072,9 +2075,9 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                     // Odd tile out (5 items -> a lone last row): spans the full width rather than
                     // stretching to double size or leaving a dead half-row, matching the mockup.
                     val (key, model) = pair.first()
-                    RecoveryVitalTile(
+                    MetricTile(
                         label = model.title,
-                        style = RECOVERY_VITAL_STYLE.getValue(key),
+                        style = METRIC_TILE_STYLE.getValue(key),
                         model = model,
                         onOpenFull = { onOpenVital(key) },
                         modifier = Modifier.fillMaxWidth(),
@@ -2166,9 +2169,9 @@ private fun RecoveryVitalsEditorDialog(
  *  falling resting HR isn't either, unlike Steps or Calories. No inline expansion: the whole tile is one
  *  tap target opening the vital's own full page via [onOpenFull]. */
 @Composable
-private fun RecoveryVitalTile(
+private fun MetricTile(
     label: String,
-    style: RecoveryVitalStyle,
+    style: MetricTileStyle,
     model: VitalDetailModel,
     onOpenFull: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2251,7 +2254,7 @@ private fun RecoveryVitalTile(
             )
         }
         LiquidTube(
-            frac = today?.let { recoveryVitalFraction(model.key, it) } ?: 0.0,
+            frac = today?.let { metricTileFraction(model.key, it) } ?: 0.0,
             tint = style.tint,
             height = 5.dp,
             animated = false,
@@ -2263,14 +2266,167 @@ private fun RecoveryVitalTile(
 /** A rough 0..1 visual proportion for the tile's fill bar — NOT a scored/clinical fraction, just enough
  *  to give the bar a sensible fill level. Mirrors the caps the pre-redesign HeroVitalRow used (HRV/120,
  *  RHR/100, respiration/24); SpO2 assumes a 0-100% scale, skin temperature a +-2C deviation window. */
-private fun recoveryVitalFraction(key: String, value: Double): Double = when (key) {
+private fun metricTileFraction(key: String, value: Double): Double = when (key) {
     "hrv" -> value / 120.0
     "rhr" -> value / 100.0
     "resp" -> value / 24.0
     "spo2" -> value / 100.0
     "skin" -> (value + 2.0) / 4.0
+    "steps_est" -> value / 10000.0
     else -> 0.0
 }.coerceIn(0.0, 1.0)
+
+/** Steps had no home anywhere in the app before this (IA phase 3, 2026-08). Loaded off the SAME
+ *  resolved series (real strap count -> imported -> motion estimate) [buildSeriesVitalDetail] already
+ *  builds for the vital_detail/steps_est page, so this tile can never disagree with that page or with
+ *  Today's own Steps card. Renders nothing until the async read completes or if there's no data yet —
+ *  a loading placeholder would be more chrome than one tile in a long scroll warrants. */
+@Composable
+private fun HealthStepsSection(vm: AppViewModel, onOpenVital: (String) -> Unit) {
+    var model by remember { mutableStateOf<VitalDetailModel?>(null) }
+    LaunchedEffect(Unit) { model = buildSeriesVitalDetail(vm, "steps_est") }
+    val m = model ?: return
+    if (m.points.isEmpty()) return
+    MetricTile(
+        label = m.title,
+        style = METRIC_TILE_STYLE.getValue("steps_est"),
+        model = m,
+        onOpenFull = { onOpenVital("steps_est") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Weight's only surface is Settings (IA phase 3, 2026-08) — a plain value + edit link, not a fabricated
+ *  tile: weight has no trend data, so a sparkline/delta would imply a signal that isn't there. */
+@Composable
+private fun HealthWeightRow(profile: ProfileStore, onOpenSettings: () -> Unit) {
+    val context = LocalContext.current
+    val unitSystem = remember { UnitPrefs.system(context) }
+    val valueText = if (unitSystem == UnitSystem.IMPERIAL) {
+        "${UnitFormatter.kgToPounds(profile.weightKg).roundToInt()} lb"
+    } else {
+        "%.1f kg".format(profile.weightKg)
+    }
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "Edit weight in Settings",
+                onClick = onOpenSettings,
+            )
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(Icons.Filled.MonitorWeight, contentDescription = null, tint = Palette.metricAmber, modifier = Modifier.size(18.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Weight", style = NoopType.body, color = Palette.textPrimary)
+            Text("Set in your profile", style = NoopType.footnote, color = Palette.textTertiary)
+        }
+        Text(valueText, style = NoopType.number(16f), color = Palette.textPrimary)
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** Compact summary cards for Stress and Hydration (IA phase 3, 2026-08) — neither had a presence on
+ *  Health before. Each reads just enough for a one-line status, NOT the full StressModel/DaytimeStress
+ *  engine or HydrationScreen's own logging UI, and taps through to its own full screen for the rest. */
+@Composable
+private fun HealthStressHydrationSection(
+    vm: AppViewModel,
+    profile: ProfileStore,
+    onOpenStress: () -> Unit,
+    onOpenHydration: () -> Unit,
+) {
+    val today by vm.today.collectAsStateWithLifecycle()
+    var stressToday by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(Unit) {
+        val rows = runCatching { vm.repo.metricSeries("my-whoop", "stress", "0000-01-01", "9999-12-31") }
+            .getOrDefault(emptyList())
+        stressToday = rows.lastOrNull()?.value?.coerceIn(0.0, 3.0)
+    }
+    var hydrationMl by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(Unit) {
+        hydrationMl = runCatching { HydrationStore.total(vm.repo) }.getOrNull()
+    }
+    val hydrationGoalMl = remember(today?.strain) { HydrationGoal.dailyGoalMl(profile.sex, today?.strain) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+        CompactMetricSummaryCard(
+            icon = Icons.Filled.Bolt,
+            tint = Palette.statusWarning,
+            label = "Stress",
+            value = stressToday?.let { "%.1f".format(it) } ?: "—",
+            caption = stressToday?.let { stressBandCaption(it) } ?: "No reading yet",
+            onClick = onOpenStress,
+        )
+        CompactMetricSummaryCard(
+            icon = Icons.Filled.WaterDrop,
+            tint = Palette.metricCyan,
+            label = "Hydration",
+            value = hydrationMl?.let { "${(it / hydrationGoalMl.coerceAtLeast(1) * 100).roundToInt()}%" } ?: "—",
+            caption = hydrationMl?.let {
+                "%.1f of %.1f L today".format(it / 1000.0, hydrationGoalMl / 1000.0)
+            } ?: "No log yet",
+            onClick = onOpenHydration,
+        )
+    }
+}
+
+/** Bands: 0-1 Low, 1-2 Moderate, 2-3 High — same cuts StressScreen's own model uses, restated here so
+ *  this compact card doesn't have to pull in StressModel/DaytimeStress for one word. */
+private fun stressBandCaption(value: Double): String = when {
+    value < 1.0 -> "Low today"
+    value < 2.0 -> "Moderate today"
+    else -> "High today"
+}
+
+/** One tap-through row: icon, label + one-line caption, a value, a chevron. No existing component fit —
+ *  [MetricTile] is a 2-column square tile built for a trend + fill bar, these are single values with no
+ *  history to show inline. */
+@Composable
+private fun CompactMetricSummaryCard(
+    icon: ImageVector,
+    tint: Color,
+    label: String,
+    value: String,
+    caption: String,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidPress(interaction)
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = "Open $label",
+                onClick = onClick,
+            )
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = NoopType.body, color = Palette.textPrimary)
+            Text(caption, style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(value, style = NoopType.number(16f), color = tint)
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp))
+    }
+}
 
 /** The intraday Heart Rate chart + window pills + min/avg/max, moved off Today's inline card into the
  *  Effort detail screen (2026-08 redesign). Always TODAY's logical day — no day-selector, since this
