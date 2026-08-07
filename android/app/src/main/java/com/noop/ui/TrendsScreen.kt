@@ -126,8 +126,6 @@ fun TrendsScreen(vm: AppViewModel) {
     // cheap memoized resolves (no-ops over an empty `days`), so the empty branch below simply ignores
     // them , same as Intelligence's hoisted range/filter. Mirrors the eager body's per-composition resolve.
     val recovery = remember(days, range) { resolveMetric(days, range) { it.recovery } }
-    val hrv = remember(days, range) { resolveMetric(days, range) { it.avgHrv } }
-    val rhr = remember(days, range) { resolveMetric(days, range) { it.restingHr?.toDouble() } }
     val strain = remember(days, range) { resolveMetric(days, range) { it.strain } }
     // Rest = the sleep_performance COMPOSITE (0–100) , the SAME metric the Today Rest score/tile and the
     // Sleep Rest-detail plot (#614 follow-up), NOT raw efficiency, which is a different number under the
@@ -167,37 +165,45 @@ fun TrendsScreen(vm: AppViewModel) {
 
         // The main card list ripples in once on appear (Reduce-Motion safe), mirroring the iOS
         // staggeredAppear sequence , each top-level section is one staggered child.
+        //
+        // IA cleanup (2026-08): three grouped zones instead of seven ungrouped blocks. HRV/Resting HR/
+        // Effort small multiples were dropped entirely — Today's Key Metrics tiles already show today's
+        // reading for each, and Explore already shows any one of them in full depth, so a third copy here
+        // was pure duplication, not "a lighter Explore." The export-PDF row was dropped too: it's the same
+        // TrendsReportExportSection Settings already hosts, so this was the only place it was duplicated.
+        // Weekly digest and Week-in-review stay two cards (not merged into one): the digest nav browses a
+        // SPECIFIC week, while Week-in-review's Charge/Effort/Rest trio averages the RANGE PICKER's window
+        // below — merging them into one card would visually imply they share a timeframe when they don't.
 
-        // --- Week-in-review digest (#208) with prev/next week browsing (#710). Past weeks render in the
-        // same format; the chevrons stay visible on an empty PAST week so the user can step on. ---
+        // --- ZONE 1: Weekly digest (#208, prev/next browsing #710) + Week in review (Charge/Effort/Rest
+        // pip trio, #732). Tighter spacing between the two binds them as one "this week" zone; the wider
+        // gap after this item (the scaffold's own item arrangement) separates it from the next zone. ---
         item {
-            Column(modifier = Modifier.staggeredAppear(index = 0)) {
+            Column(
+                modifier = Modifier.staggeredAppear(index = 0),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
                 WeeklyDigestNav(
                     days = days,
                     weekOffset = weekOffset,
                     minWeekOffset = minWeekOffset,
                     onStep = { delta -> weekOffset = (weekOffset + delta).coerceIn(minWeekOffset, 0) },
                 )
+                WeekInReviewCard(
+                    charge = recovery,
+                    effort = strain,
+                    rest = rest,
+                    effortScale = effortScale,
+                )
             }
         }
 
-        // --- Week in review , the Charge / Effort / Rest trio in NOOP's pip language (PipBar +
-        // CountUpText), mirroring the iOS TrendsView.weekInReview card. White count-up numbers over
-        // segmented count-up bars; self-hides when none of the three carry a window mean. ---
-        item {
-            WeekInReviewCard(
-                charge = recovery,
-                effort = strain,
-                rest = rest,
-                effortScale = effortScale,
-                modifier = Modifier.staggeredAppear(index = 1),
-            )
-        }
-
-        // --- Range control ---
+        // --- ZONE 2: Charge over time , the range picker directly controls the hero chart below it, so
+        // they're one zone: range control, then the hero. Charge (green) world: domain card wash, a crisp
+        // flat line with a bright "now" end-cap, and a TrendChip for the window's move. ---
         item {
             Column(
-                modifier = Modifier.staggeredAppear(index = 2),
+                modifier = Modifier.staggeredAppear(index = 1),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space8),
             ) {
                 Row(
@@ -218,98 +224,44 @@ fun TrendsScreen(vm: AppViewModel) {
                     style = NoopType.footnote,
                     color = if (recovery.widened) Palette.statusWarning else Palette.textTertiary,
                 )
-            }
-        }
-
-        // --- Hero , charge over time. Charge (green) world: domain card wash, a crisp flat line with a
-        // bright "now" end-cap, and a TrendChip for the window's move. ---
-        item {
-            ChartCard(
-                modifier = Modifier.staggeredAppear(index = 3),
-                title = stringResource(R.string.trends_charge),
-                // The range bar above already prints the authoritative reading-count caption;
-                // the hero only names its window so the count isn't doubled in one card height.
-                subtitle = range.subtitle,
-                trailing = recAvg?.let { "${it.roundToInt()}" },
-                // LIQUID hero: the translucent-black frosted wrapper + a small count-up Charge vessel accent
-                // in the header (the screen's one headline single value — the window-average Charge). The
-                // line chart below stays crisp. Small multiples pass liquidHero = false → untouched.
-                liquidHero = true,
-                headlineValue = recAvg,
-                color = Palette.chargeColor,
-                tipColor = Palette.chargeBright,
-                tint = Palette.chargeColor,
-                values = recovery.values,
-                dates = recovery.dates,
-                formatY = { "${it.roundToInt()}" },
-                change = periodChange(recovery.values),
-                higherIsBetter = true,
-                changeFmt = { "${it.roundToInt()}" },
-                // Lift the ceiling ~6% so a near-100 peak and the now-cap halo clear the top gridline ,
-                // mirrors the iOS hero's `valueRange: 0...106`.
-                chartHeadroom = 0.06f,
-                footer = listOf(
-                    stringResource(R.string.trends_avg) to (recAvg?.let { "${it.roundToInt()}" } ?: EM_DASH),
-                    stringResource(R.string.trends_peak) to (recovery.values.maxOrNull()?.let { "${it.roundToInt()}" } ?: EM_DASH),
-                    stringResource(R.string.trends_low) to (recovery.values.minOrNull()?.let { "${it.roundToInt()}" } ?: EM_DASH),
-                    stringResource(R.string.trends_days) to "${recovery.values.size}",
-                ),
-            )
-        }
-
-        // --- Small multiples , HRV / Resting HR / Effort. HRV/RHR are Charge sub-signals → the green
-        // card world (each line keeps its metric hue); Effort is the WHOOP blue strain world. ---
-        // No trailing window label , the range bar's overline already states it.
-        item {
-            Column(
-                modifier = Modifier.staggeredAppear(index = 4),
-                verticalArrangement = Arrangement.spacedBy(Metrics.gap),
-            ) {
-                SectionHeader(stringResource(R.string.trends_daily_signals), overline = stringResource(R.string.nav_trends))
-                MetricTrendCard(
-                    title = stringResource(R.string.trends_hrv_full), unit = "ms",
-                    color = Palette.metricPurple,
+                ChartCard(
+                    title = stringResource(R.string.trends_charge),
+                    // The range bar above already prints the authoritative reading-count caption;
+                    // the hero only names its window so the count isn't doubled in one card height.
+                    subtitle = range.subtitle,
+                    trailing = recAvg?.let { "${it.roundToInt()}" },
+                    // LIQUID hero: the translucent-black frosted wrapper + a small count-up Charge vessel accent
+                    // in the header (the screen's one headline single value — the window-average Charge). The
+                    // line chart below stays crisp.
+                    liquidHero = true,
+                    headlineValue = recAvg,
+                    color = Palette.chargeColor,
+                    tipColor = Palette.chargeBright,
                     tint = Palette.chargeColor,
+                    values = recovery.values,
+                    dates = recovery.dates,
+                    formatY = { "${it.roundToInt()}" },
+                    change = periodChange(recovery.values),
                     higherIsBetter = true,
-                    resolved = hrv,
-                    fmt = { "${it.roundToInt()}" },
-                )
-                MetricTrendCard(
-                    title = stringResource(R.string.trends_resting_hr_full), unit = "bpm",
-                    color = Palette.metricRose,
-                    tint = Palette.chargeColor,
-                    higherIsBetter = false,
-                    resolved = rhr,
-                    fmt = { "${it.roundToInt()}" },
-                )
-                MetricTrendCard(
-                    // Plotted values stay on the stored 0–100 scale (line shape unchanged); only the displayed
-                    // numbers + unit follow the Effort-scale toggle, converted inside `fmt`. (#268)
-                    title = stringResource(R.string.trends_effort), unit = "/ ${UnitFormatter.effortScaleMax(effortScale)}",
-                    // WHOOP: Effort/Strain is always BLUE , a deep→bright blue line, not the amber ramp.
-                    color = Palette.effortColor,
-                    tint = Palette.effortColor,
-                    tipColor = Palette.effortBright,
-                    higherIsBetter = null,
-                    resolved = strain,
-                    fmt = { UnitFormatter.effortDisplay(it, effortScale) },
+                    changeFmt = { "${it.roundToInt()}" },
+                    // Lift the ceiling ~6% so a near-100 peak and the now-cap halo clear the top gridline ,
+                    // mirrors the iOS hero's `valueRange: 0...106`.
+                    chartHeadroom = 0.06f,
+                    footer = listOf(
+                        stringResource(R.string.trends_avg) to (recAvg?.let { "${it.roundToInt()}" } ?: EM_DASH),
+                        stringResource(R.string.trends_peak) to (recovery.values.maxOrNull()?.let { "${it.roundToInt()}" } ?: EM_DASH),
+                        stringResource(R.string.trends_low) to (recovery.values.minOrNull()?.let { "${it.roundToInt()}" } ?: EM_DASH),
+                        stringResource(R.string.trends_days) to "${recovery.values.size}",
+                    ),
                 )
             }
         }
 
-        // --- Recovery history strip (stands in for the macOS YearHeatStrip) ---
+        // --- ZONE 3: Recovery history strip (stands in for the macOS YearHeatStrip) , already a single
+        // self-labelled card, so it needs no further grouping. ---
         item {
-            Column(modifier = Modifier.staggeredAppear(index = 5)) {
+            Column(modifier = Modifier.staggeredAppear(index = 2)) {
                 RecoveryHistoryCard(days = days, range = range)
-            }
-        }
-
-        // --- Export trends report (#436) , the shareable offline PDF exporter. Mirrors the iOS
-        // TrendsView.exportReportRow footer; the same composable Settings hosts, so both surfaces
-        // offer it. Routed through NoopButton like every other CTA (no gold). ---
-        item {
-            Column(modifier = Modifier.staggeredAppear(index = 6)) {
-                TrendsReportExportSection(vm)
             }
         }
     }
@@ -880,42 +832,6 @@ private fun prettyAxisDate(day: String?): String =
         runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM", Locale.US)) }
             .getOrDefault(it)
     }.orEmpty()
-
-/** A labelled metric-trend card built from a [ResolvedMetric] with mean / min / max. */
-@Composable
-private fun MetricTrendCard(
-    title: String,
-    unit: String,
-    color: Color,
-    resolved: ResolvedMetric,
-    fmt: (Double) -> String,
-    tint: Color? = null,
-    tipColor: Color = color,
-    higherIsBetter: Boolean? = null,
-) {
-    val avg = resolved.values.averageOrNull()
-    ChartCard(
-        title = title,
-        subtitle = null,
-        trailing = avg?.let { fmt(it) },
-        color = color,
-        tint = tint,
-        tipColor = tipColor,
-        values = resolved.values,
-        dates = resolved.dates,
-        formatY = fmt,
-        change = periodChange(resolved.values),
-        higherIsBetter = higherIsBetter,
-        changeFmt = fmt,
-        footer = listOf(
-            // Plain "Mean" to match the bare Min/Max columns; the unit moves into the value
-            // (e.g. "58 ms") so uppercasing can't render a shouty "MEAN MS".
-            stringResource(R.string.trends_mean) to (avg?.let { "${fmt(it)} $unit" } ?: EM_DASH),
-            stringResource(R.string.trends_min) to (resolved.values.minOrNull()?.let { fmt(it) } ?: EM_DASH),
-            stringResource(R.string.trends_max) to (resolved.values.maxOrNull()?.let { fmt(it) } ?: EM_DASH),
-        ),
-    )
-}
 
 /**
  * The window's trend as a signed mean-of-recent-half minus mean-of-earlier-half , drives the card's
