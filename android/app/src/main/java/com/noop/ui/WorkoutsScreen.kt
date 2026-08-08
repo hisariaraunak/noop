@@ -1257,6 +1257,13 @@ private fun SessionRow(
  * single latest-workout tile and the Workouts screen's "All Sessions" list, #… "switch it everywhere for
  * consistency"). Previously lived inside a [androidx.compose.material3.ModalBottomSheet]
  * (`WorkoutDetailSheet`); the sheet chrome is gone but every stat/chart below is unchanged.
+ *
+ * 2026-08 bug fix: dropped this Column's own `.verticalScroll` — [WorkoutDetailScreen] is its only
+ * caller now (the old ModalBottomSheet host is gone), and that screen's `ScreenScaffold` is already
+ * a scrolling Column, so nesting a second vertically-scrolling Column inside it crashed with
+ * "Vertically scrollable component was measured with an infinity maximum height constraints" the
+ * moment a real row was found (previously masked by an unrelated bug that meant this composable was
+ * never actually reached with a non-null row from Today's entry point).
  */
 @Composable
 fun WorkoutDetailBody(vm: AppViewModel, row: WorkoutRow, modifier: Modifier = Modifier) {
@@ -1292,11 +1299,13 @@ fun WorkoutDetailBody(vm: AppViewModel, row: WorkoutRow, modifier: Modifier = Mo
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
             .padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // 2026-08 audit: this row is now the ONLY header on the workout detail page — ScreenScaffold's
+        // own title/subtitle are turned off for this screen (WorkoutDetailScreen.kt) since they used to
+        // duplicate the sport name + date shown here.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 sportIcon(row.sport),
@@ -1391,12 +1400,9 @@ fun WorkoutDetailBody(vm: AppViewModel, row: WorkoutRow, modifier: Modifier = Mo
                 Row(modifier = Modifier.fillMaxWidth()) {
                     z.forEachIndexed { i, m -> ZoneStat(i + 1, m, total, Modifier.weight(1f)) }
                 }
-                Text(
-                    if (zonesFromImport) "WHOOP's imported per-zone split for this session."
-                    else "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate).",
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
+                // 2026-08 audit: dropped the "WHOOP's imported per-zone split..."/"Time in each %HRmax
+                // zone..." explainer that used to sit here — the "Whoop import"/"From strap HR" label
+                // right above the bar already says which one this is, without a second sentence.
             }
         }
 
@@ -1591,16 +1597,19 @@ private fun RecoveryTrendChart(
 
 /**
  * #796 - the workout detail's per-session Effort contribution card. The Effort-amber tinted [NoopCard]
- * carries a "This session" overline, the captured strain as a big count-up value (the NOOP signature),
- * its scale caption (Effort 0–100 or strain 0–21), and a one-line explainer. Mirrors the iOS
- * WorkoutDetailView.effortCard: same colour world, same count-up, same copy. [strain] is the stored
- * 0–100 Effort value; [effortScale] only changes how it is DISPLAYED, never the stored number.
+ * carries the captured strain as a big count-up value (the NOOP signature), its scale caption (Effort
+ * 0–100 or strain 0–21), and a one-line explainer — no separate section header (2026-08 audit: the
+ * scale caption already names the metric). Mirrors the iOS WorkoutDetailView.effortCard: same colour
+ * world, same count-up, same copy. [strain] is the stored 0–100 Effort value; [effortScale] only
+ * changes how it is DISPLAYED, never the stored number.
  */
 @Composable
 private fun SessionEffortCard(strain: Double, effortScale: EffortScale) {
     val shown = UnitFormatter.effortValue(strain, effortScale)
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
-        SectionHeader("Effort", overline = "This session")
+        // 2026-08 audit: dropped the SectionHeader("Effort", overline = "This session") that used to
+        // sit here — the card's own "Effort (0-100)"/"strain (0-21)" caption right under the count-up
+        // value already names the metric and its scale, making a section title above it redundant.
         NoopCard(tint = Palette.effortColor) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

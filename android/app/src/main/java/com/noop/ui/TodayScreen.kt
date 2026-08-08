@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
@@ -711,6 +712,31 @@ fun TodayScreen(
         stepsEstForDay = byDay[selectedDayKey]?.let { Math.round(it).toInt() }
     }
 
+    // 2026-08 audit: the Key Metrics Steps tile's trend delta / "N-day avg" caption (LiquidKeyTile,
+    // computed generically off `data.spark`) never showed, because Window.steps only read the strap's
+    // on-device count (DailyMetric.steps) — for anyone whose steps mostly come from Health Connect
+    // import or the on-device estimate (the SAME two fallbacks the tile's own displayed value already
+    // uses), that window was empty or near-empty, so there was no "before" to average or diff against.
+    // These two windowed maps (kept separate from the single-day effects above, which also do a live
+    // "refresh today's steps" read that a bulk historical fetch shouldn't duplicate) let the trend
+    // window apply the SAME real -> imported -> estimate precedence per day, not just for today.
+    var importedStepsByDay by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var estimatedStepsByDay by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    LaunchedEffect(days) {
+        importedStepsByDay = runCatching {
+            (viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
+                viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31"))
+                .mapNotNull { row -> row.steps?.let { row.day to it } }
+                .groupBy({ it.first }, { it.second })
+                .mapValues { (_, v) -> v.max() }
+        }.getOrDefault(emptyMap())
+        estimatedStepsByDay = runCatching {
+            viewModel.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
+                strapDeviceId = viewModel.activeStrapId)
+                .values.associate { it.first to Math.round(it.second).toInt() }
+        }.getOrDefault(emptyMap())
+    }
+
     // The selected day's representative activity class for the Steps tile icon (#316 / @63). Reads the day's
     // step samples (now carrying `activityClass` after the v13 column) over the local-day window and takes the
     // LAST non-null class as "what the wrist was doing most recently today" (0=still, 1=walk, 2=run). null when
@@ -952,7 +978,7 @@ fun TodayScreen(
     // mixed winners show at most two sources in Charge / Effort / Rest order so the pill stays compact.
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
-    val window = rememberTrendWindow(days, selectedDay, keyMetricsWindowDays)
+    val window = rememberTrendWindow(days, selectedDay, keyMetricsWindowDays, importedStepsByDay, estimatedStepsByDay)
 
     LaunchedEffect(days) {
         // #849: this footer pass is the heavy one. It derives HR per imported workout from raw strap samples
@@ -1098,6 +1124,15 @@ fun TodayScreen(
             val keyDate = runCatching { LocalDate.parse(selectedDayKey) }.getOrNull() ?: selectedDay
             keyDate.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.US))
         }
+        // 2026-08 audit: terse "8 Aug" form for the date pill beside the title (design "C" from the
+        // mockup round) — the weekday name is dropped from the VISIBLE text since dayTitle already
+        // names the day ("Today"/"Yesterday"/the weekday itself for older days); humanDate (the full
+        // "Saturday, 8 August") stays as the semantics contentDescription so screen readers still get
+        // the complete date.
+        val humanDateShort = run {
+            val keyDate = runCatching { LocalDate.parse(selectedDayKey) }.getOrNull() ?: selectedDay
+            keyDate.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+        }
         // #486: header + wordmark + Arrange fold into ONE compact top cluster. Previously the decorative
         // "N O O P" wordmark and the pinned "Arrange" affordance were each their own full-width list item,
         // so the scaffold's 12dp rowSpacing left two near-empty sky bands stacked under the header ("empty
@@ -1111,6 +1146,7 @@ fun TodayScreen(
             LiquidTodayHeader(
                 dayTitle = dayTitle,
                 humanDate = humanDate,
+                humanDateShort = humanDateShort,
                 selectedDay = selectedDay,
                 batteryPct = if (liveSnap.connected) liveSnap.batteryPct else null,
                 backfilling = liveSnap.backfilling,
@@ -1406,7 +1442,9 @@ fun TodayScreen(
                                     // No date overline: the screen header already says "Today · <date>", and
                                     // repeating it on every section made the same string appear three times
                                     // on one scroll. The trailing trend window still qualifies the tiles.
-                                    SectionHeader("Key Metrics", trailing = trendWindowLabel(keyMetricsWindowDays))
+                                    // 2026-08 audit: renamed from "Key Metrics" to "Overview" (user's pick
+                                    // from a set of naming options).
+                                    SectionHeader("Overview", trailing = trendWindowLabel(keyMetricsWindowDays))
                                 }
                                 TodayEditAction(
                                     onClick = { showMetricsEditor = true },
@@ -1949,6 +1987,7 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
 private fun LiquidTodayHeader(
     dayTitle: String,
     humanDate: String,
+    humanDateShort: String,
     selectedDay: LocalDate,
     batteryPct: Double?,
     // #245: sync state for the compact header chip (twin of iOS SyncStatusChip).
@@ -1994,13 +2033,15 @@ private fun LiquidTodayHeader(
 
     Row(
         modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // LEFT: the tappable title block — big rounded-bold day title over the human date line. Taps open the
-        // day picker; a horizontal swipe across the dashboard still changes the day. weight(1f) so the title
-        // claims the leading room and never pushes the trailing control cluster. Mirrors iOS's title Button.
-        Column(
+        // LEFT: the tappable title block — 2026-08 audit ("design C" from the mockup round): the day
+        // title beside a small calendar-icon pill carrying the terse date ("8 Aug"), replacing the old
+        // two-line title-over-date-line stack. Taps open the day picker; a horizontal swipe across the
+        // dashboard still changes the day. weight(1f) so the title claims the leading room and never
+        // pushes the trailing control cluster.
+        Row(
             modifier = Modifier
                 .weight(1f)
                 // #492: NO rounded clip here. With indication = null there's no ripple to shape, and the
@@ -2013,7 +2054,8 @@ private fun LiquidTodayHeader(
                     onClick = { showPicker = true },
                 )
                 .semantics { contentDescription = uiString(R.string.l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96, dayTitle, humanDate) },
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 dayTitle,
@@ -2025,13 +2067,27 @@ private fun LiquidTodayHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                humanDate,
-                style = NoopType.caption.copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.35f), offset = Offset(0f, 1f), blurRadius = 8f)),
-                color = Color.White.copy(alpha = 0.78f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.14f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Icon(
+                    Icons.Filled.CalendarMonth,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier.size(13.dp),
+                )
+                Text(
+                    humanDateShort,
+                    style = NoopType.caption,
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 1,
+                )
+            }
         }
 
         // RIGHT: the controls, in order — [sync chip] · avatar · + · battery ring. Each ~34dp, 8dp apart.
@@ -2521,15 +2577,22 @@ private fun SynthesisHeroCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // The greeting yields/ellipsises first; the pill keeps its full width (#527).
+            //
+            // 2026-08 bug fix: this used to be `weight(1f, fill = false)` PLUS a separate
+            // `Spacer(Modifier.weight(1f))` after it — two equal-weight elements splitting the leading
+            // space 50/50 regardless of whether the greeting actually needed that much, so "Good
+            // morning" ellipsised to "Good morni…" even when there was plenty of real room. A single
+            // `weight(1f)` (fill = true) on the greeting alone gives it ALL the space up to the pills,
+            // which are un-weighted and stay pinned to the trailing edge exactly as before — the
+            // greeting now only truncates when the row is genuinely too narrow for it.
             Text(
                 greetingWord(),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
             // S4 (#205): the one-word readiness read kept on the hero now the full Readiness card folded
             // into the Charge-ring tap. Push / Maintain / Rest; hidden when there isn't enough history.
             // Tapping it opens the Charge breakdown, where the full Readiness card now lives.
@@ -2956,10 +3019,12 @@ private fun YourCardsSection(
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             // Header: same SectionHeader + edit-icon shell Key Metrics uses (2026-08 audit — this used to
             // be a bare Overline, a lighter, inconsistent treatment one section away from Key Metrics'
-            // bold title).
+            // bold title). Renamed "Your cards" -> "Core Signals" (2026-08 audit, user's pick) — this
+            // section pins a handful of broader health markers (Stress, Fitness Age, Vitality, etc)
+            // beyond the three hero scores; "Your cards" named the UI mechanism, not what's in it.
             Row(verticalAlignment = Alignment.Top) {
                 Box(modifier = Modifier.weight(1f)) {
-                    SectionHeader("Your cards")
+                    SectionHeader("Core Signals")
                 }
                 TodayEditAction(
                     onClick = onCustomise,
@@ -5227,9 +5292,10 @@ private fun TodayWorkoutsSection(
     val tint = latest.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor
     val interaction = remember { MutableInteractionSource() }
 
-    // "Latest Workouts", not "Last": "Last" read as "final". Mirrored on iOS (TodayView). Lives in
-    // strings.xml (values + values-de) so the header is localizable like the nav labels.
-    SectionHeader(stringResource(R.string.today_latest_workouts), overline = "Activity")
+    // "Workouts" (2026-08 audit: was "Latest Workouts" under an "Activity" overline — dropped both,
+    // the section shows exactly one row so "latest" and "activity" were implied, not informative).
+    // Lives in strings.xml (values + values-de) so the header is localizable like the nav labels.
+    SectionHeader(stringResource(R.string.today_latest_workouts))
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -5572,8 +5638,13 @@ private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
     windowDays: Int,
+    // 2026-08 audit (#616 follow-up): real -> imported -> estimate per day, the same precedence the
+    // Steps tile's own displayed VALUE already uses, so the tile's delta/"N-day avg" caption has a
+    // real trailing window to compare against instead of only the strap's on-device count.
+    importedStepsByDay: Map<String, Int> = emptyMap(),
+    estimatedStepsByDay: Map<String, Int> = emptyMap(),
 ): Window =
-    androidx.compose.runtime.remember(days, anchorDay, windowDays) {
+    androidx.compose.runtime.remember(days, anchorDay, windowDays, importedStepsByDay, estimatedStepsByDay) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
         val cutoff = anchorDay.minusDays((windowDays - 1).toLong()).toString()
@@ -5588,7 +5659,9 @@ private fun rememberTrendWindow(
             rhr = series { it.restingHr?.toDouble() },
             spo2 = series { it.spo2Pct },
             resp = series { it.respRateBpm },
-            steps = series { it.steps?.toDouble() },   // #616
+            steps = recent.mapNotNull { d ->
+                (d.steps ?: importedStepsByDay[d.day] ?: estimatedStepsByDay[d.day])?.toDouble()
+            },
         )
     }
 

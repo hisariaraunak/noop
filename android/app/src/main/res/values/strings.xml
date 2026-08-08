@@ -57,8 +57,12 @@
     <string name="action_breathe">Breathe</string>
 
     <!-- Today screen: header of the workouts feed. Renamed from "Last Workouts" ("Last" read as
-         "final", #34/#53 follow-up); wording mirrored on iOS in Localizable.xcstrings. -->
-    <string name="today_latest_workouts">Latest Workouts</string>
+         "final", #34/#53 follow-up); wording mirrored on iOS in Localizable.xcstrings.
+         2026-08 audit: shortened to just "Workouts" (dropped "Latest" + the "Activity" overline it
+         sat under) — the section shows exactly one row, so "latest" was implied, not informative.
+         NOTE: only the English value was updated; values-es/zh/de/pt-rPT/fr still say the old
+         "Latest Workouts" translation and need a real translation pass, not a guess. -->
+    <string name="today_latest_workouts">Workouts</string>
     <string name="today_customize_title">Customize Today</string>
     <string name="today_customize_action">Customize</string>
     <string name="today_customize_description">Reorder what is shown, or move a section to Hidden without deleting it.</string>
@@ -918,7 +922,11 @@
     <string name="l10n_today_screen_label_value_b781d590">%1$s %2$s</string>
     <string name="l10n_today_screen_move_item_card_title_down_abd8549a">Move %1$s down</string>
     <string name="l10n_today_screen_move_item_card_title_up_61a1b306">Move %1$s up</string>
-    <string name="l10n_today_screen_my_dashboard_a7a19e72">My Dashboard</string>
+    <!-- 2026-08 audit: renamed from "My Dashboard" to match the "Core Signals" SectionHeader rename on
+         Today (this is that section's own edit dialog) — was a third name for the same feature.
+         NOTE: only the English value was updated; values-zh/de/es/fr/pt-rPT still say the old "My
+         Dashboard" translation and need a real translation pass, not a guess. -->
+    <string name="l10n_today_screen_my_dashboard_a7a19e72">Core Signals</string>
     <string name="l10n_today_screen_needs_a_tracked_night_ccfd532a">needs a tracked night</string>
     <string name="l10n_today_screen_new_here_b81f2e17">New here?</string>
     <string name="l10n_today_screen_now_e3b82040">Now</string>
@@ -1628,7 +1636,11 @@
     <string name="l10n_today_screen_dismiss_to_updates_2c7915b8">Dismiss to Updates</string>
     <string name="l10n_today_screen_each_line_is_how_many_points_dec2c062">Each line is how many points that signal moved Charge versus sitting at your </string>
     <string name="l10n_today_screen_edit_5301648d">Edit</string>
-    <string name="l10n_today_screen_edit_key_metrics_f95e61a4">Edit Key Metrics</string>
+    <!-- 2026-08 audit: renamed from "Edit Key Metrics" to match the "Overview" SectionHeader rename on
+         Today (this is that section's own edit dialog).
+         NOTE: only the English value was updated; values-es/pt-rPT/de/zh/fr still say the old "Edit
+         Key Metrics" translation and need a real translation pass, not a guess. -->
+    <string name="l10n_today_screen_edit_key_metrics_f95e61a4">Edit Overview</string>
     <string name="l10n_today_screen_heart_rate_variability_a137586d">Heart-rate variability</string>
     <string name="l10n_today_screen_how_domain_label_is_calculated_8897768c">How %1$s is calculated</string>
     <string name="l10n_today_screen_latest_bpm_e7bec767">%1$s bpm</string>

@@ -1061,7 +1061,7 @@ fun Hypnogram(
                 if (w <= 0f || h <= 0f || stages.isEmpty() || total <= 0f) {
                     // Inset well only (or nothing if degenerate) — matches the old baseline-only state.
                     onDrawBehind {
-                        if (w > 0f && h > 0f) drawRoundedTrack(Palette.surfaceInset)
+                        if (w > 0f && h > 0f) drawFlatTrack(Palette.surfaceInset)
                     }
                 } else {
                     val segs = ArrayList<Triple<Color, Float, Float>>(stages.size)
@@ -1077,7 +1077,7 @@ fun Hypnogram(
                     }
                     onDrawBehind {
                         // Inset well background so the strip reads as a recessed track.
-                        drawRoundedTrack(Palette.surfaceInset)
+                        drawFlatTrack(Palette.surfaceInset)
                         segs.forEach { (c, left, width) ->
                             drawSegment(color = c, left = left, width = width, height = h)
                         }
@@ -1113,7 +1113,7 @@ fun SegmentBar(
         val total = weights.sum()
         if (w <= 0f || h <= 0f || segments.isEmpty() || total <= 0f) {
             onDrawBehind {
-                if (w > 0f && h > 0f) drawRoundedTrack(Palette.surfaceInset)
+                if (w > 0f && h > 0f) drawFlatTrack(Palette.surfaceInset)
             }
         } else {
             val segs = ArrayList<Triple<Color, Float, Float>>(segments.size)
@@ -1128,31 +1128,36 @@ fun SegmentBar(
                 x += segW
             }
             onDrawBehind {
-                drawRoundedTrack(Palette.surfaceInset)
+                drawFlatTrack(Palette.surfaceInset)
                 segs.forEach { (c, left, width) -> drawSegment(color = c, left = left, width = width, height = h) }
             }
         }
     })
 }
 
-private fun DrawScope.drawRoundedTrack(color: Color) {
+// 2026-08 audit: flattened from StrokeCap.Round to match the app's "flat bars everywhere" convention
+// (BarChart/DailyColumnChart went flat earlier this session) — extends it to the two remaining
+// rounded-cap chart primitives, Hypnogram (Sleep's stage-timeline strip) and SegmentBar (HR Zones in
+// Workout Detail, Health Effort's "Time in zones"), both of which draw through these two helpers.
+private fun DrawScope.drawFlatTrack(color: Color) {
     drawLine(
         color = color,
         start = Offset(0f, size.height / 2f),
         end = Offset(size.width, size.height / 2f),
         strokeWidth = size.height,
-        cap = StrokeCap.Round,
+        cap = StrokeCap.Butt,
     )
 }
 
 private fun DrawScope.drawSegment(color: Color, left: Float, width: Float, height: Float) {
-    val cap = (height / 2f).coerceAtMost(width / 2f)
+    // Butt caps don't extend past the line's endpoints (unlike the old Round cap, which needed the
+    // `cap` inset below to compensate for its added radius) — draw edge-to-edge directly.
     drawLine(
         color = color,
-        start = Offset(left + cap, height / 2f),
-        end = Offset((left + width - cap).coerceAtLeast(left + cap), height / 2f),
+        start = Offset(left, height / 2f),
+        end = Offset(left + width, height / 2f),
         strokeWidth = height,
-        cap = StrokeCap.Round,
+        cap = StrokeCap.Butt,
     )
 }
 

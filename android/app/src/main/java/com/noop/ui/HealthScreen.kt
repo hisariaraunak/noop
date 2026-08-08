@@ -1727,7 +1727,12 @@ fun VitalDetailScreen(
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
     ScreenScaffold(
-        title = detail?.title ?: "Vital Signs",
+        // 2026-08 audit: "recovery" is the one vital_detail key with a branding mismatch — this app's
+        // primary term for the score is "Charge" everywhere else (Today, Trends, KeyMetric.CHARGE),
+        // but this page's own title only ever said the older WHOOP-native "Recovery". Naming both
+        // avoids a page that silently means two different things depending on which name you know it
+        // by. No other key has this — HRV/RHR/etc. only ever go by one name in this app.
+        title = if (key == "recovery") "Charge/Recovery" else (detail?.title ?: "Vital Signs"),
         subtitle = when {
             key == "fitness_age" && loadedPoints == 0 -> "What your Fitness Age still needs."
             loadedPoints == 1 -> "Your latest reading — trend to follow."
@@ -1833,7 +1838,11 @@ fun VitalDetailScreen(
         val max = values.maxOrNull()
         val avg = values.average()
 
-        SectionHeader(detail.title, overline = "Vital Signs", trailing = "${filteredReadings.size} readings")
+        // 2026-08 audit: dropped the SectionHeader that used to sit here (title = detail.title, overline
+        // = "Vital Signs") — it verbatim-repeated the ScreenScaffold title one screen-length above, under
+        // a generic overline that named nothing specific. The reading count it carried as `trailing`
+        // moves into this Row instead, so the trend chart follows straight on from the ScreenScaffold
+        // header without a redundant second title in between.
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.Top) {
@@ -1850,6 +1859,11 @@ fun VitalDetailScreen(
                             color = Palette.textTertiary,
                         )
                     }
+                    Text(
+                        "${filteredReadings.size} readings",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
                 }
                 val shownRanges = if (key in RECOVERY_CHART_KEYS) RECOVERY_VITAL_RANGES else VitalDetailRange.entries
                 SegmentedPillControl(
@@ -1998,6 +2012,20 @@ private val METRIC_TILE_STYLE = mapOf(
     "steps_est" to MetricTileStyle(Icons.AutoMirrored.Filled.DirectionsWalk, Palette.metricCyan),
 )
 
+/** Compact tile labels for the Recovery Vitals grid (2026-08 audit) — reuses Today's Key Metrics
+ *  abbreviations (KeyMetricPrefs.kt) so the same metric reads the same short way everywhere in the
+ *  app, rather than the full vital_detail titles ("Heart Rate Variability", "Resting Heart Rate",
+ *  "Respiratory Rate") that were ellipsis-truncating in MetricTile's single-line label at 2-column
+ *  width. [model.title] (the full name) is untouched — still the right length for the vital's own
+ *  detail-page header. */
+private val RECOVERY_VITAL_TILE_LABEL = mapOf(
+    "hrv" to KeyMetric.HRV.title,
+    "rhr" to KeyMetric.RESTING_HR.title,
+    "resp" to KeyMetric.RESPIRATORY.title,
+    "spo2" to KeyMetric.BLOOD_OXYGEN.title,
+    "skin" to "Skin Temperature",
+)
+
 /** One filterable tile in the Charge screen's Recovery Vitals grid. [key] is the stable persisted
  *  identifier (matches the `vital_detail/<key>` route + [METRIC_TILE_STYLE]'s map key). */
 private enum class RecoveryVital(val key: String, val title: String) {
@@ -2053,8 +2081,11 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
     var showEditor by remember { mutableStateOf(false) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
+        // 2026-08 audit: shortened from SectionHeader("Recovery vitals", overline = "Vital Signs") —
+        // the 3rd header on this page to name "Recovery"/"Vital Signs" verbatim. "Vitals" alone reads
+        // fine here (and everywhere else this shared grid renders) without repeating the page topic.
         Box(modifier = Modifier.weight(1f)) {
-            SectionHeader("Recovery vitals", overline = "Vital Signs")
+            SectionHeader("Vitals")
         }
         TodayEditAction(
             onClick = { showEditor = true },
@@ -2080,7 +2111,7 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                         pair.forEach { (key, model) ->
                             val reading = vitalDetailReading(model)
                             MetricTile(
-                                label = model.title,
+                                label = RECOVERY_VITAL_TILE_LABEL.getValue(key),
                                 style = METRIC_TILE_STYLE.getValue(key),
                                 value = reading.value,
                                 unit = reading.unit,
@@ -2098,7 +2129,7 @@ private fun RecoveryVitalsGrid(days: List<DailyMetric>, tempUnit: TemperatureUni
                     val (key, model) = pair.first()
                     val reading = vitalDetailReading(model)
                     MetricTile(
-                        label = model.title,
+                        label = RECOVERY_VITAL_TILE_LABEL.getValue(key),
                         style = METRIC_TILE_STYLE.getValue(key),
                         value = reading.value,
                         unit = reading.unit,

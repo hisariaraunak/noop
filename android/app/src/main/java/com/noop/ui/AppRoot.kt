@@ -304,7 +304,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 GlassBottomBar(
                     current = current,
                     onTabSelected = { dest ->
-                        if (dest.route != currentRoute) nav.navigateTopLevel(dest.route)
+                        if (dest.route != currentRoute) nav.navigateToTab(dest.route)
                     },
                 )
             },
@@ -948,6 +948,26 @@ private fun NavHostController.navigateTopLevel(route: String) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+/**
+ * Bottom-bar tab tap: always lands on that tab's OWN root, clearing any detail screen drilled into
+ * from it (e.g. Today's vital_detail/workout_detail cards) — the standard "tap the tab you're
+ * already in to pop to its root" idiom every iOS/Android tab bar follows.
+ *
+ * 2026-08 bug fix: the bar used to route through [navigateTopLevel], whose saveState+restoreState
+ * silently RESTORED whatever sub-screen was pushed on top of a tab rather than showing its root — so
+ * tapping "Today" while on a detail page reached FROM Today (e.g. Charge/Recovery) looked exactly
+ * like the tap did nothing, because it restored that identical detail page. Confirmed live: a
+ * programmatic tap landed back on the same Recovery screen instead of Today's home. Scoped to just
+ * the bottom bar (not [navigateTopLevel] itself, which ~10 other non-tab-bar navigations — Settings,
+ * Journal, Devices — still use, where restoring a prior scroll position is the right call).
+ */
+private fun NavHostController.navigateToTab(route: String) {
+    navigate(route) {
+        popUpTo(route) { inclusive = true }
+        launchSingleTop = true
     }
 }
 

@@ -3031,9 +3031,12 @@ private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
             )
             Spacer(Modifier.height(Metrics.space16))
         } else if (filteredPoints.size < 2) {
+            // 2026-08 audit: dropped the "Sleep" overline here — for 2 of this sheet's 7 metric keys
+            // (efficiency, sleep_debt) it repeated the word right above a title that also starts with
+            // "Sleep" ("Sleep Efficiency"/"Sleep Debt"); the Sleep tab context already establishes the
+            // topic without a header needing to restate it.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Overline("Sleep")
                     Text(spec.title, style = NoopType.title2, color = Palette.textPrimary)
                 }
             }
@@ -3055,7 +3058,9 @@ private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Overline("Sleep · ${filteredPoints.size} nights")
+                    // 2026-08 audit: dropped the "Sleep · " prefix — same reasoning as the sparse-data
+                    // branch above.
+                    Overline("${filteredPoints.size} nights")
                     Text(spec.title, style = NoopType.title2, color = Palette.textPrimary)
                     Text(uiString(R.string.l10n_sleep_screen_as_of_latest_first_726f20bb, latest.first), style = NoopType.footnote, color = Palette.textTertiary)
                 }
