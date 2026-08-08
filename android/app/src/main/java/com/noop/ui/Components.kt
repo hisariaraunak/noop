@@ -50,6 +50,8 @@ import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -284,6 +286,46 @@ fun SectionHeader(
         if (trailing != null) {
             Text(trailing, style = NoopType.footnote, color = Palette.textSecondary)
         }
+    }
+}
+
+// MARK: - Expandable section disclosure (promoted from Sleep's IA cleanup, 2026-08)
+
+/** The tappable header row for a collapsed-by-default section: overline + title, a chevron that flips
+ *  with the state. Tapping toggles in place — no navigation, no sheet. The content itself is the
+ *  caller's own `item{}`s, conditionally emitted right after this header in the same LazyColumn, so
+ *  collapsing a section really does stop composing/measuring its content rather than just hiding it.
+ *  Originated on Sleep (Secondary Insights / Historical Trends); promoted here so any screen can reuse
+ *  the same disclosure idiom instead of inventing its own expand/collapse visual. */
+@Composable
+fun ExpandableSectionHeader(
+    title: String,
+    overline: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .frostedCardSurface(cornerRadius = 14.dp)
+            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
+            .clickable(
+                onClickLabel = if (expanded) "Collapse $title" else "Expand $title",
+                onClick = onToggle,
+            )
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Overline(overline)
+            Text(title, style = NoopType.title2, color = Palette.textPrimary)
+        }
+        Icon(
+            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+        )
     }
 }
 

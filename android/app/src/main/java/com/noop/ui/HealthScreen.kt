@@ -200,7 +200,10 @@ fun HealthScreen(
 
     LazyScreenScaffold(
         title = "Health & Wellness",
-        subtitle = "Live vitals, streamed from the strap.",
+        // 2026-08 audit: was "Live vitals, streamed from the strap." — stale since the Phase 3 merge
+        // made this screen the full hub (vitals, Steps, Weight, Stress/Hydration, Fitness Age,
+        // Vitality, skin-temp suite), not just a live-vitals readout.
+        subtitle = "Your body, beyond the daily scores.",
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
@@ -1674,7 +1677,7 @@ private val SERIES_BACKED_VITAL_KEYS = setOf("fitness_age", "vitality", "steps_e
 private val RECOVERY_CHART_KEYS = setOf("recovery", "hrv", "rhr", "resp", "spo2", "skin")
 
 /** A shorter range picker (1W/1M/3M) for the six recovery-chart keys only — every other vital_detail
- *  key keeps the full [VitalDetailRange.entries] (W/2W/3W/M/3M/6M/1Y/ALL) unchanged. */
+ *  key keeps the full [VitalDetailRange.entries] (W/M/3M/6M/1Y/ALL), the app-wide standard set. */
 private val RECOVERY_VITAL_RANGES = listOf(VitalDetailRange.WEEK, VitalDetailRange.MONTH, VitalDetailRange.THREE_MONTH)
 
 @Composable
@@ -2260,7 +2263,9 @@ private fun HealthStepsSection(vm: AppViewModel, onOpenVital: (String) -> Unit) 
 }
 
 /** Weight's only surface is Settings (IA phase 3, 2026-08) — a plain value + edit link, not a fabricated
- *  tile: weight has no trend data, so a sparkline/delta would imply a signal that isn't there. */
+ *  tile: weight has no trend data, so a sparkline/delta would imply a signal that isn't there.
+ *  2026-08 audit: rerouted through [CompactMetricSummaryCard] — this was a byte-for-byte hand copy of
+ *  that row shape (icon + label/caption + trailing value + chevron). */
 @Composable
 private fun HealthWeightRow(profile: ProfileStore, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
@@ -2270,32 +2275,14 @@ private fun HealthWeightRow(profile: ProfileStore, onOpenSettings: () -> Unit) {
     } else {
         "%.1f kg".format(profile.weightKg)
     }
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidPress(interaction)
-            .clip(RoundedCornerShape(14.dp))
-            .frostedCardSurface(cornerRadius = 14.dp)
-            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClickLabel = "Edit weight in Settings",
-                onClick = onOpenSettings,
-            )
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(Icons.Filled.MonitorWeight, contentDescription = null, tint = Palette.metricAmber, modifier = Modifier.size(18.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text("Weight", style = NoopType.body, color = Palette.textPrimary)
-            Text("Set in your profile", style = NoopType.footnote, color = Palette.textTertiary)
-        }
-        Text(valueText, style = NoopType.number(16f), color = Palette.textPrimary)
-        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp))
-    }
+    CompactMetricSummaryCard(
+        icon = Icons.Filled.MonitorWeight,
+        tint = Palette.metricAmber,
+        label = "Weight",
+        caption = "Set in your profile",
+        value = valueText,
+        onClick = onOpenSettings,
+    )
 }
 
 /** Compact summary cards for Stress and Hydration (IA phase 3, 2026-08) — neither had a presence on
@@ -2363,6 +2350,10 @@ internal fun CompactMetricSummaryCard(
     caption: String,
     onClick: () -> Unit,
     value: String? = null,
+    // Defaults to tint (the value IS the metric reading for Stress/Hydration/Weight), but a caller
+    // whose tint marks something else — e.g. EffortWorkoutRow's per-workout strain-intensity icon
+    // tint, unrelated to the duration shown as `value` — can override so the number stays neutral.
+    valueColor: Color = tint,
 ) {
     val interaction = remember { MutableInteractionSource() }
     Row(
@@ -2388,7 +2379,7 @@ internal fun CompactMetricSummaryCard(
             Text(caption, style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (value != null) {
-            Text(value, style = NoopType.number(16f), color = tint)
+            Text(value, style = NoopType.number(16f), color = valueColor)
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp))
     }
@@ -2644,43 +2635,21 @@ private fun EffortTodaysWorkoutsSection(
     )
 }
 
+// 2026-08 audit: rerouted through CompactMetricSummaryCard — same icon + label/caption + trailing
+// value + chevron row, just with a per-workout strain-intensity icon tint (kept off the duration
+// value via CompactMetricSummaryCard's valueColor override).
 @Composable
 private fun EffortWorkoutRow(workout: WorkoutRow, onClick: () -> Unit) {
     val tint = workout.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidPress(interaction)
-            .clip(RoundedCornerShape(14.dp))
-            .frostedCardSurface(cornerRadius = 14.dp)
-            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClickLabel = "See this workout's detail",
-                onClick = onClick,
-            )
-            .padding(horizontal = 13.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(sportIcon(workout.sport), contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(WorkoutEditing.displaySport(workout.sport), style = NoopType.body, color = Palette.textPrimary)
-            Text(
-                workoutCaption(workout), style = NoopType.footnote, color = Palette.textTertiary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(workoutDuration(workout), style = NoopType.number(14f), color = Palette.textPrimary)
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = Palette.textTertiary,
-            modifier = Modifier.size(16.dp),
-        )
-    }
+    CompactMetricSummaryCard(
+        icon = sportIcon(workout.sport),
+        tint = tint,
+        label = WorkoutEditing.displaySport(workout.sport),
+        caption = workoutCaption(workout),
+        value = workoutDuration(workout),
+        valueColor = Palette.textPrimary,
+        onClick = onClick,
+    )
 }
 
 /** Short name + description per HR zone, straight off the `HrZones.kt` %HRmax band-edge comments (Zone 1

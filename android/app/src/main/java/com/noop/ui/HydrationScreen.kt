@@ -73,9 +73,11 @@ import java.util.Locale
 // tube), the flat cards keep the frosted surface. All data bindings, the pure HydrationGoal engine, and the
 // local-only HydrationStore reads/writes are UNCHANGED — this is a restyle only. Mirrors the iOS HydrationView.
 
-/** The reset accent blue (matches NoopButton's pinned iOS `StrandPalette.accent`: #234F9E / #60A0E0). */
+/** The reset accent blue — reuses [noopAccentBlue] (NoopButton.kt) rather than re-declaring the same
+ *  pinned hex pair (2026-08 audit: this used to be its own copy, the one raw Color literal outside
+ *  Palette in this file). */
 private val hydrationAccent: Color
-    @Composable get() = if (Palette.isLight) Color(0xFF234F9E) else Color(0xFF60A0E0)
+    @Composable get() = noopAccentBlue
 
 // MARK: - Liquid hero tokens (shared with the liquid Today hero card)
 //
@@ -244,24 +246,17 @@ fun HydrationScreen(viewModel: AppViewModel) {
                             )
                         }
                     }
-                    // DAILY GOAL — a genuine single-value progress bar, so it reads as a LiquidTube (static:
-                    // it sits in a detail hero, not a live surface). Same goal fraction as the vessel.
-                    LiquidTube(
-                        frac = fraction.toDouble().coerceIn(0.0, 1.0),
-                        tint = accent,
-                        height = Metrics.progressHeight,
-                        animated = false,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics {
-                                contentDescription =
-                                    uiString(R.string.l10n_hydration_screen_kotlin_math_min_100_fraction_100_416d2889, kotlin.math.min(100, (fraction * 100).toInt()))
-                            },
-                    )
+                    // 2026-08 audit: dropped the LiquidTube bar that used to sit here — same goal
+                    // fraction as the vessel above AND the percent text below, a third repeat of one
+                    // number. Vessel (visual) + percent (precise) cover it between them.
                     Text(
                         uiString(R.string.l10n_hydration_screen_kotlin_math_min_100_fraction_100_72f2dfde, kotlin.math.min(100, (fraction * 100).toInt())),
                         style = NoopType.footnote,
                         color = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                uiString(R.string.l10n_hydration_screen_kotlin_math_min_100_fraction_100_416d2889, kotlin.math.min(100, (fraction * 100).toInt()))
+                        },
                     )
                 }
             }

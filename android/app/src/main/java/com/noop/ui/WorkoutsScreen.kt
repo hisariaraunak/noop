@@ -186,7 +186,7 @@ fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
     }
 
     // #516: use the same active filter/range as the workout page, capped to 90 days. The cap keeps a deep
-    // imported history from launching hundreds of raw-HR reads; 7D/30D/90D are the promised trend views.
+    // imported history from launching hundreds of raw-HR reads; W/M/3M are the promised trend views.
     val recoveryRange = run {
         val resolved = effectiveRange(allRows, range, filter)
         if (resolved.days == null || resolved.days > 90) WorkoutRange.Quarter else resolved
@@ -434,7 +434,7 @@ private fun RangeBar(
     onAdd: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Phone width can't fit the labelled Add button beside the 5-segment range pill without
+        // Phone width can't fit the labelled Add button beside the 6-segment range pill without
         // crushing/clipping one — stack them (button, then pill), matching the iPhone fix (#234/#339).
         AddWorkoutButton(onAdd)
         SegmentedPillControl(
@@ -676,7 +676,6 @@ private fun EffortHero(
     val fraction = (avgStrain / 100.0).coerceIn(0.0, 1.0)
     val shownEffort = UnitFormatter.effortValue(avgStrain, effortScale)
     val totalTimeH = rows.mapNotNull { it.durationS }.sum() / 3600.0
-    val modal = groups.firstOrNull()
 
     // The liquid hero CARD: a translucent near-black that floats over the day-of-sky so the vessel + white
     // count-up read crisp. Radius 26 + a faint white hairline give the frosted-glass edge of the iOS liquid
@@ -733,12 +732,8 @@ private fun EffortHero(
                     HeroStat("Sessions", "${rows.size}", Palette.effortColor, Modifier.weight(1f))
                     HeroStat("Active", oneDecimal(totalTimeH) + "h", Palette.textPrimary, Modifier.weight(1f))
                 }
-                Text(
-                    if (modal != null) "Mostly ${WorkoutEditing.displaySport(modal.sport)} (${effectiveRange.caption})."
-                    else "Logged sessions across ${effectiveRange.caption}.",
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
+                // 2026-08 audit: dropped the "Mostly {sport}" caption that used to sit here — the
+                // Summary grid's "Most Active" tile below states the same modal sport, more scannably.
             }
         }
     }
@@ -763,31 +758,18 @@ private fun SummarySection(
     // Imperial/Metric display preference (D#103). Distances are stored in metres; the toggle re-labels
     // them. Read here so a change recomposes the tiles. Display-only — nothing stored changes.
     val unitSystem = UnitPrefs.system(LocalContext.current)
-    val totalCount = rows.size
-    val totalTimeH = rows.mapNotNull { it.durationS }.sum() / 3600.0
     val totalKcal = rows.mapNotNull { it.energyKcal }.sum()
     val totalKm = rows.mapNotNull { it.distanceM }.sum() / 1000.0
     val modal = groups.firstOrNull()
 
+    // 2026-08 audit: dropped "Total Workouts" and "Total Time" tiles here — the hero row right above
+    // this grid already shows both (Sessions/Active), same values, same range. This grid's job is now
+    // the totals the hero DOESN'T cover.
+    //
+    // Kept on StatTile rather than MetricTile — these are range-aggregate totals for whatever's
+    // already selected above, not a grid of distinct metrics each needing their own tap-through
+    // history. Same reasoning as Stress's MarkerTile grid.
     val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { m ->
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_workouts_screen_total_workouts_7abd421f),
-                value = "$totalCount",
-                caption = effectiveRange.caption,
-                accent = Palette.effortColor,
-            )
-        },
-        { m ->
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_workouts_screen_total_time_8ce2e6c3),
-                value = oneDecimal(totalTimeH) + "h",
-                caption = "active",
-                accent = Palette.textPrimary,
-            )
-        },
         { m ->
             StatTile(
                 modifier = m,
@@ -2055,19 +2037,22 @@ private fun FullDivider(alpha: Float = 1f) {
 
 // MARK: - Range model
 
+// 2026-08 audit: relabeled from the 7D/30D/90D/1Y/All style (and added Half/6M) to match the
+// app-wide standard range-picker set (W/M/3M/6M/1Y/ALL) used by Trends/Stress/Intelligence/Explore.
 private enum class WorkoutRange(val label: String, val caption: String, val days: Int?, val heroWord: String) {
-    Week("7D", "last 7 days", 7, "week"),
-    Month("30D", "last 30 days", 30, "month"),
-    Quarter("90D", "last 90 days", 90, "quarter"),
+    Week("W", "last 7 days", 7, "week"),
+    Month("M", "last 30 days", 30, "month"),
+    Quarter("3M", "last 90 days", 90, "quarter"),
+    Half("6M", "last 6 months", 180, "half year"),
     Year("1Y", "last year", 365, "year"),
-    All("All", "all time", null, "log"),
+    All("ALL", "all time", null, "log"),
 }
 
 /** The HRR card must not interpolate the range enum's legacy English-only caption into localized copy. */
 private fun WorkoutRange.localizedCaption(): String = when (this) {
     WorkoutRange.Week -> uiString(R.string.l10n_workouts_screen_hrr_last_7_days_516)
     WorkoutRange.Month -> uiString(R.string.l10n_workouts_screen_hrr_last_30_days_516)
-    WorkoutRange.Quarter, WorkoutRange.Year, WorkoutRange.All ->
+    WorkoutRange.Quarter, WorkoutRange.Half, WorkoutRange.Year, WorkoutRange.All ->
         uiString(R.string.l10n_workouts_screen_hrr_last_90_days_516)
 }
 

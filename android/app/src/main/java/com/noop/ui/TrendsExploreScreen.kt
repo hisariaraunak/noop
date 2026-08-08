@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -404,24 +405,23 @@ fun TrendsExploreScreen(vm: AppViewModel) {
         )
         }
 
-        // RANGE BAR , overline + title + the one segmented window control, with a caption
-        // that flags a sparse auto-widen.
+        // RANGE BAR , the one segmented window control, with an optional description and a caption
+        // that flags a sparse auto-widen. 2026-08 audit: dropped this row's own category+title —
+        // the MetricDropdown right above it already shows both prominently as its own control label,
+        // and the Hero card below restates the title again as its own overline; a third instance here
+        // added nothing.
         item {
         Row(verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f)) {
-                Overline(selected.category)
-                Text(selected.title, style = NoopType.title2, color = Palette.textPrimary)
-                // The plain-English one-liner for the three headline scores (Charge/Effort/Rest);
-                // null for every other metric, so only the scores show a subtitle here.
-                selected.description?.let { blurb ->
-                    Text(
-                        blurb,
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
-                        modifier = Modifier.padding(top = Metrics.space2),
-                    )
-                }
-            }
+            // The plain-English one-liner for the three headline scores (Charge/Effort/Rest);
+            // null for every other metric, so only the scores show a subtitle here.
+            selected.description?.let { blurb ->
+                Text(
+                    blurb,
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.weight(1f),
+                )
+            } ?: Spacer(Modifier.weight(1f))
             SegmentedPillControl(
                 items = ExploreRange.entries.toList(),
                 selection = range,
@@ -675,11 +675,11 @@ private fun HeroChartCard(
                 }
             }
 
-            // Footer chips, mirroring the macOS ChartFooter (Window / Points / Latest).
+            // Footer chips: Window / Points. Dropped the third "Latest" chip (2026-08 audit) — it
+            // repeated the SAME heroValue already shown two lines above as this card's own headline.
             Row(horizontalArrangement = Arrangement.spacedBy(Metrics.sectionGap)) {
                 ChartFootItem(stringResource(R.string.explore_chart_window), effectiveRange.label)
                 ChartFootItem(stringResource(R.string.explore_chart_points), "${windowed.size}")
-                ChartFootItem(stringResource(R.string.explore_latest), heroValue)
             }
         }
     }
@@ -703,6 +703,11 @@ private fun domainTint(category: String): Color = when (category) {
 
 // MARK: - Stat tile row
 
+// 2026-08 audit: kept on StatTile rather than the app-standard MetricTile — these tiles are
+// computed statistics (average/min/max/delta) about the one metric already charted above, not a
+// grid of distinct metrics each needing their own tap-through history, and "Delta vs prev" needs
+// good/bad coloring via metric.higherIsBetter, which MetricTile's deliberately-neutral arrow can't
+// express. Same reasoning as Stress's MarkerTile grid.
 @Composable
 private fun StatRow(
     metric: MetricSpec,
@@ -712,7 +717,6 @@ private fun StatRow(
 ) {
     val values = windowed.map { it.value }
     val s = statOf(values)
-    val latest = series.lastOrNull()
 
     // Δ vs the previous equal-length window (by point count), tinted by higherIsBetter.
     val prev = remember(series, windowed) { previousWindow(series, windowed) }
@@ -759,25 +763,17 @@ private fun StatRow(
                 accent = Palette.textPrimary,
             )
         }
-        // Half-width gives the comparison tile room for its value, delta chip and window caption.
-        Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-            StatTile(
-                modifier = Modifier.weight(1f),
-                label = stringResource(R.string.explore_delta_vs_prev),
-                value = deltaText,
-                caption = deltaCaption,
-                accent = Palette.textPrimary,
-                delta = pctChange?.let { "${if (it >= 0) "+" else ""}${String.format(Locale.US, "%.1f", it)}%" },
-                deltaColor = deltaColor,
-            )
-            StatTile(
-                modifier = Modifier.weight(1f),
-                label = stringResource(R.string.explore_latest),
-                value = latest?.let { metric.format(it.value) } ?: ",",
-                caption = latest?.day,
-                accent = metric.accent,
-            )
-        }
+        // Full-width, like Average above: dropped the paired "Latest" tile (2026-08 audit) — the Hero
+        // card above already shows the latest reading as its own headline, twice over was clutter.
+        StatTile(
+            modifier = Modifier.fillMaxWidth(),
+            label = stringResource(R.string.explore_delta_vs_prev),
+            value = deltaText,
+            caption = deltaCaption,
+            accent = Palette.textPrimary,
+            delta = pctChange?.let { "${if (it >= 0) "+" else ""}${String.format(Locale.US, "%.1f", it)}%" },
+            deltaColor = deltaColor,
+        )
     }
 }
 

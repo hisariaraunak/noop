@@ -36,8 +36,6 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.WbSunny
@@ -2156,44 +2154,6 @@ private fun NightNavHeader(
                     Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213), style = NoopType.subhead, color = Palette.textTertiary)
                 }
             },
-        )
-    }
-}
-
-// MARK: - Expandable section disclosure (IA cleanup, 2026-08)
-
-/** The tappable header row for a collapsed-by-default section: overline + title, a chevron that flips
- *  with the state. Tapping toggles in place — no navigation, no sheet. The content itself is the
- *  caller's own `item{}`s, conditionally emitted right after this header in the same LazyColumn, so
- *  collapsing a section really does stop composing/measuring its content rather than just hiding it. */
-@Composable
-private fun ExpandableSectionHeader(
-    title: String,
-    overline: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .frostedCardSurface(cornerRadius = 14.dp)
-            .border(1.dp, Palette.hairlineStrong, RoundedCornerShape(14.dp))
-            .clickable(
-                onClickLabel = if (expanded) "Collapse $title" else "Expand $title",
-                onClick = onToggle,
-            )
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Overline(overline)
-            Text(title, style = NoopType.title2, color = Palette.textPrimary)
-        }
-        Icon(
-            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-            contentDescription = null,
-            tint = Palette.textTertiary,
         )
     }
 }

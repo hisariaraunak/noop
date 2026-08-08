@@ -85,8 +85,11 @@ private object NoopButtonMetrics {
 
 // MARK: - Design-reset accent (WHOOP blue) — pinned to the iOS values, never gold
 
-/** The reset accent blue (iOS `StrandPalette.accent`: #234F9E light / #60A0E0 dark). */
-private val noopAccentBlue: Color
+/** The reset accent blue (iOS `StrandPalette.accent`: #234F9E light / #60A0E0 dark). `internal` (not
+ *  `private`) so other screens needing this SAME pinned value (e.g. Hydration's hero accent) reuse it
+ *  instead of re-declaring the raw hex pair — 2026-08 audit found HydrationScreen.kt had grown its own
+ *  byte-identical copy. */
+internal val noopAccentBlue: Color
     @Composable get() = if (Palette.isLight) Color(0xFF234F9E) else Color(0xFF60A0E0)
 
 /** Crisp white label/icon on accent + critical fills (iOS `goldDeepText` = #FFFFFF post-reset). */

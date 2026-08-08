@@ -407,6 +407,9 @@ private fun PoincarePlot(
 
 // ── Stats card — the descriptive numbers (equal-height tiles) ─────────────────────────────
 
+// 2026-08 audit: kept on StatTile rather than MetricTile — these are descriptive statistics
+// (SD1/SD2/ratio/RMSSD%/beat count) for the current window's Poincaré plot, not a grid of distinct
+// metrics each needing their own tap-through history. Same reasoning as Stress's MarkerTile grid.
 @Composable
 private fun StatsCard(headline: RhythmScreener.WindowResult?) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {

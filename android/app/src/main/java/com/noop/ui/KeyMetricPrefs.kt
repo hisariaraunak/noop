@@ -33,9 +33,12 @@ enum class KeyMetric(val raw: String, val title: String) {
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
 
-        /** The original, hard-coded grid order — the default when the layout isn't customised. */
+        /** The default grid order when the layout isn't customised. HRV/Resting HR dropped from the
+         *  default (2026-08 audit) — Today's Recovery Vitals row (HeartAndVitalsCard) already shows both
+         *  every day, so they rendered 3x on a stock install (there + here + Your Cards). Still fully
+         *  selectable via the Key Metrics editor for anyone who wants them pinned here too. */
         val defaultOrder: List<KeyMetric> = listOf(
-            CHARGE, EFFORT, REST, HRV, RESTING_HR,
+            CHARGE, EFFORT, REST,
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
     }

@@ -2897,11 +2897,11 @@ private fun VitalStatTile(
 
 // MARK: - "Your cards" dashboard (WHOOP "My Dashboard"), iOS yourCardsSection parity
 //
-// A persisted, reorderable selection of metric cards surfaced on Today as flat WHOOP metric ROWS. The
-// section header carries the "Your cards" overline + a right-aligned BLUE "CUSTOMISE" text action; each row
-// is a leading tinted icon tile + UPPERCASE tracked label over a grey baseline caption on the left, and the
-// big white value + small unit + chevron on the right. A card with no value yet renders a dash rather than
-// vanishing. Mirrors iOS TodayView.yourCardsSection / pinnedCardRow / dashboardValue / dashboardTint.
+// A persisted, reorderable selection of metric cards surfaced on Today as flat WHOOP metric ROWS. Each
+// row is a leading tinted icon tile + UPPERCASE tracked label over a grey baseline caption on the left,
+// and the big white value + small unit + chevron on the right. A card with no value yet renders a dash
+// rather than vanishing. Mirrors iOS TodayView.yourCardsSection / pinnedCardRow / dashboardValue /
+// dashboardTint.
 
 /** Shared Today section edit affordance. The 48dp box keeps the whole control easy to tap while its
  *  visible content stays pinned to the overline instead of centring against a two-line header. */
@@ -2954,12 +2954,17 @@ private fun YourCardsSection(
 ) {
     Box(modifier = Modifier.fillMaxWidth().staggeredAppear(2)) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-            // Header: "YOUR CARDS" overline + a right-aligned blue EDIT action (the WHOOP ✎ affordance).
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Overline("Your cards", modifier = Modifier.weight(1f))
+            // Header: same SectionHeader + edit-icon shell Key Metrics uses (2026-08 audit — this used to
+            // be a bare Overline, a lighter, inconsistent treatment one section away from Key Metrics'
+            // bold title).
+            Row(verticalAlignment = Alignment.Top) {
+                Box(modifier = Modifier.weight(1f)) {
+                    SectionHeader("Your cards")
+                }
                 TodayEditAction(
                     onClick = onCustomise,
                     contentDescription = uiString(R.string.l10n_today_screen_customise_your_cards_2428d761),
+                    contentAlignment = Alignment.TopCenter,
                 )
             }
             cards.forEach { card ->
@@ -5204,7 +5209,13 @@ private fun WorkoutGlyph(icon: ImageVector, modifier: Modifier = Modifier) {
  *  an effort fill bar (matching the Key-Metrics tile language elsewhere), duration, and a chevron making
  *  the tap-through to the workout's own detail page explicit. Drops the separate "See all workouts" text
  *  link the old StatTile version had below it — Workouts now has three other guaranteed paths (the More
- *  drawer, the FAB, and Effort's own Today's Workouts section), so repeating it here was redundant chrome. */
+ *  drawer, the FAB, and Effort's own Today's Workouts section), so repeating it here was redundant chrome.
+ *
+ *  2026-08 audit: NOT rerouted through [CompactMetricSummaryCard] despite the surface resemblance
+ *  (icon + label/caption + trailing value + chevron) — this card's icon-chip background and inline
+ *  LiquidTube effort fill are a genuinely richer treatment that CompactMetricSummaryCard deliberately
+ *  doesn't do ("no history to show inline", per its own doc comment). Confirmed with the user rather
+ *  than either dropping the fill bar or growing the shared component past a simple nav row. */
 @Composable
 private fun TodayWorkoutsSection(
     workouts: List<WorkoutRow>,

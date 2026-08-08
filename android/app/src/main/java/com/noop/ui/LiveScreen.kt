@@ -384,6 +384,9 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                             style = NoopType.number(22f), color = Palette.textPrimary,
                         )
                     }
+                    // 2026-08 audit: kept on StatTile rather than MetricTile — these update live, second
+                    // by second, during an in-progress session; MetricTile's tap-through "see history"
+                    // semantics and fill bar don't apply to a number that's still moving.
                     Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                         StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_hr_f187928f), value = bpm?.toString() ?: "—",
                             accent = if (bpm == null) Palette.textPrimary else Palette.metricRose)
@@ -673,6 +676,9 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
  * Read-only Max-HR + top-zone card. Max HR is the age-based value from Settings; the Zone 5 entry
  * (≥ 90% of max) is where HR-zone coaching buzzes. Managing coaching lives in Automations.
  * Reimplemented from @cbarrado's PR #350.
+ *
+ * 2026-08 audit: kept on StatTile rather than MetricTile — these mirror a Settings value, not a
+ * trackable metric with its own history to tap into.
  */
 @Composable
 private fun MaxHrZoneCard(hrMax: Int, zone5Bpm: Int, coachingOn: Boolean) {
@@ -783,7 +789,10 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                     SourceBadge("SYNCING ${live.syncChunksThisSession}", tint = Palette.metricCyan)
                 }
             }
-            // Stats row — battery / worn / last-sync. Worn is only trustworthy on a live link.
+            // Stats row — battery / worn. Worn is only trustworthy on a live link. Dropped the
+            // "Last sync" stat that used to sit here (2026-08 audit): the same relative-time value
+            // reappears, with more context (error/in-progress/completed), as the "History sync"
+            // SignalTile further down, and in full sentence form in the backfill status banner above.
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                 // Charging bolt next to the battery % when the strap reports it's charging (PR #568 reimpl).
                 HeaderStat(
@@ -792,7 +801,6 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                     charging = live.charging == true,
                 )
                 HeaderStat("Worn", wornLabel(live, activeConnection, ouraWear))
-                HeaderStat("Last sync", lastSyncLabel(live))
             }
         }
     }

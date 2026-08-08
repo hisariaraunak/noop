@@ -78,10 +78,10 @@ internal fun vitalReadingDateLabel(day: String): String {
     }
 }
 
+// 2026-08 audit: trimmed from 8 entries (dropped TWO_WEEK/THREE_WEEK) to match the app-wide
+// standard range-picker set (W/M/3M/6M/1Y/ALL) used by Trends/Stress/Intelligence/Explore/Sleep.
 internal enum class VitalDetailRange(val label: String, val days: Long?) {
     WEEK("W", 7),
-    TWO_WEEK("2W", 14),
-    THREE_WEEK("3W", 21),
     MONTH("M", 30),
     THREE_MONTH("3M", 90),
     SIX_MONTH("6M", 180),
@@ -101,11 +101,10 @@ internal fun vitalHistorySpanDays(points: List<Pair<String, Double>>): Long {
  *  LATEST reading, so with under a week of history every window returned the identical full point set
  *  and all six chips drew the same line (a week of data stretched full-width under a "1Y" label). A
  *  range only differs from its predecessor once the data span EXCEEDS the predecessor's window, so the
- *  unlocked set is a contiguous prefix: W always, 2W once span > 7 days, 3W once > 14, M once > 21,
- *  3M once > 30, 6M once > 90, 1Y once > 180, ALL once > 365. (The 1D/2D experiment was dropped: daily
- *  metrics hold at most one point per day, so those windows could never draw a line.) Locked chips render
- *  disabled rather than hidden so a calibrating user still learns the longer views exist; W (the shortest)
- *  staying unconditional means nobody is ever stranded with zero ranges. */
+ *  unlocked set is a contiguous prefix: W always, M once span > 7 days, 3M once > 30, 6M once > 90,
+ *  1Y once > 180, ALL always (see below). Locked chips render disabled rather than hidden so a
+ *  calibrating user still learns the longer views exist; W (the shortest) staying unconditional means
+ *  nobody is ever stranded with zero ranges. */
 /**
  * The range the chips + caption actually describe, resolved NON-DESTRUCTIVELY (Swift parity with
  * MetricExplorerView.coercedSelection). A locked selection renders as the largest unlocked range with

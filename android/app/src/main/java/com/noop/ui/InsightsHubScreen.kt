@@ -115,12 +115,16 @@ fun InsightsHubScreen(vm: AppViewModel) {
         // --- What moves your Charge -------------------------------------------
         item { MoversSection(outcome = outcome, onOutcome = { outcome = it }, ranked = ranked) }
 
-        item { Spacer(Modifier.height(Metrics.sectionGap - 20.dp)) }
+        // 2026-08 audit: was a hand-rolled `Metrics.sectionGap - 20.dp` — identical value to
+        // Metrics.selectorTopUp (the named token every other screen uses for this same top-up).
+        item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
 
         // --- Dose-response (alcohol / caffeine) -------------------------------
         item { DoseSection(state.doseCards) }
 
-        item { Spacer(Modifier.height(Metrics.sectionGap - 20.dp)) }
+        // 2026-08 audit: was a hand-rolled `Metrics.sectionGap - 20.dp` — identical value to
+        // Metrics.selectorTopUp (the named token every other screen uses for this same top-up).
+        item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
 
         // --- Method / honesty note --------------------------------------------
         item {
@@ -152,8 +156,12 @@ private fun MoversSection(
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         // Header then the outcome selector on its own row below it — on a ~360dp phone the pill
         // control can't share a row with the weighted header without compressing (matches macOS).
+        // 2026-08 audit: was "What moves your {outcome}" — for the default (Charge) outcome that's a
+        // verbatim repeat of the screen's own title ("What Moves Your Charge") one line up. The pill
+        // control right below already states which outcome is selected, so this just needs to name
+        // the section, not restate the page.
         SectionHeader(
-            "What moves your ${outcome.outcomeName.lowercase(Locale.US)}",
+            "Ranked effects",
             overline = "Ranked · your data",
         )
         SegmentedPillControl(
@@ -182,6 +190,10 @@ private fun MoversSection(
     }
 }
 
+// 2026-08 audit: With/Without and per-unit tiles below stay on StatTile rather than MetricTile —
+// they're a one-off comparison pair valenced by outcome.higherIsBetter (statusPositive/Critical),
+// not a grid of distinct metrics with their own tap-through history. Same reasoning as Stress's
+// MarkerTile grid and Explore's StatRow.
 @Composable
 private fun MoverCard(r: RankedEffect, outcome: InsightsOutcome) {
     val e = r.effect

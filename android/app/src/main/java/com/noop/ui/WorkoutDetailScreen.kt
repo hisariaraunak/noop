@@ -24,7 +24,13 @@ fun WorkoutDetailScreen(vm: AppViewModel, deviceId: String, startTs: Long) {
     val rows by vm.workouts.collectAsState()
     val row = rows.firstOrNull { it.deviceId == deviceId && it.startTs == startTs }
 
-    ScreenScaffold(title = row?.let { WorkoutEditing.displaySport(it.sport) } ?: "Workout") {
+    // 2026-08 audit: this was the only screen in the app with no subtitle at all. Reuses the same
+    // date/time-range formatter (workoutCaption, TodayScreen.kt) Today's own Latest Workout card and
+    // the Workouts list already format this exact string with.
+    ScreenScaffold(
+        title = row?.let { WorkoutEditing.displaySport(it.sport) } ?: "Workout",
+        subtitle = row?.let { workoutCaption(it) },
+    ) {
         if (row == null) {
             Text(
                 "This workout is no longer available.",

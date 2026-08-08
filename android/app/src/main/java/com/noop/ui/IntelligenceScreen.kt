@@ -256,13 +256,18 @@ private fun ExplainerCard(effortScale: EffortScale) {
                 )
                 Text(uiString(R.string.l10n_intelligence_screen_how_this_works_b895a8c3), style = NoopType.headline, color = Palette.textPrimary)
             }
+            // 2026-08 audit: dropped the specific per-signal percentages from this prose — the
+            // ModelBreakdownCard right below restates the exact same five weights as bars, so stating
+            // them twice (once as "(~55%)... (~20%)..." text, once as meters) was pure duplication.
+            // uiString(...) already ends "...against your personal baseline " (trailing space).
             Text(
                 uiString(R.string.l10n_intelligence_screen_charge_weighs_your_heart_rate_variability_026745e6) +
-                    "(~55%), resting heart rate (~20%), rest quality (~15%), respiration (~5%) " +
-                    "and skin-temperature deviation (~5%). Effort is a 0 - ${UnitFormatter.effortScaleMax(effortScale)} " +
-                    "cardiovascular load from time spent in each heart-rate zone. Rest is staged " +
-                    "from movement and heart rate. The full on-device recompute from the strap's raw " +
-                    "streams is a later port; the scores below are read from each day's cached metrics.",
+                    "— plus resting heart rate, rest quality, respiration and skin-temperature " +
+                    "deviation; see the exact weights below. Effort is a " +
+                    "0 - ${UnitFormatter.effortScaleMax(effortScale)} cardiovascular load from time " +
+                    "spent in each heart-rate zone. Rest is staged from movement and heart rate. The " +
+                    "full on-device recompute from the strap's raw streams is a later port; the scores " +
+                    "below are read from each day's cached metrics.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )

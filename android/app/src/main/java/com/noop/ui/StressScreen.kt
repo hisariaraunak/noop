@@ -867,17 +867,15 @@ private fun hourLabel(hour: Int): String {
 
 @Composable
 private fun StressTiles(model: StressModel) {
+    // 2026-08 audit: dropped the "Stress" tile that used to lead this grid — StressHeroCard above
+    // already shows the same score + band (vessel fill, count-up number, StatePill), so this was a
+    // verbatim second copy right below it.
+    //
+    // Kept on StatTile/MarkerTile rather than migrating to the app-standard MetricTile: RHR/HRV's
+    // delta needs sign-aware good/bad coloring tied to stress direction (MarkerTile's whole job),
+    // which MetricTile deliberately never does (its arrow is always neutral, by design — see
+    // MetricTile's doc comment). Confirmed with the user rather than silently forcing the swap.
     val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { m ->
-            // Today's stress value, with its band as the caption.
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_stress_screen_stress_bad33342),
-                value = String.format(Locale.US, "%.1f", model.score),
-                caption = "of 3 · ${model.band.title}",
-                accent = StressRamp.color(model.score),
-            )
-        },
         { m ->
             // Resting HR — an INCREASE is the stressful direction.
             MarkerTile(
@@ -976,8 +974,9 @@ private fun StressTrendSection(model: StressModel, modifier: Modifier = Modifier
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
                     ) {
+                        // 2026-08 audit: dropped this Column's own "Stress · {range}" overline — the
+                        // SectionHeader right above already states "Stress Trend" + the same range label.
                         Column(modifier = Modifier.weight(1f)) {
-                            Overline("Stress · ${range.label}")
                             Text(
                                 uiString(R.string.l10n_stress_screen_daily_0_3_proxy_63247929),
                                 style = NoopType.footnote,
