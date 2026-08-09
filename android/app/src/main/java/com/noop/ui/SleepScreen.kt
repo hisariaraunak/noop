@@ -624,11 +624,10 @@ fun SleepScreen(
                 item { SleepMetricsGrid(m, onMetricClick = { detailMetricKey = it }) }
 
                 // LAST 14 DAYS (2026-08 IA cleanup) — everything multi-night: the hours-asleep trend, the
-                // sleep-debt ledger, and hours-vs-needed. Folded behind a disclosure — same reasoning as
-                // Night Metrics' old Secondary Insights. Rest's own trend card and the bedtime/wake
-                // consistency card were both dropped (2026-08) — Rest already has a full-history trend on
-                // its own vital_detail page, and bedtime/wake consistency duplicated the Night Metrics
-                // "Consistency" tile without adding anything the tile's own detail sheet doesn't cover.
+                // sleep-debt ledger, hours-vs-needed, and bedtime/wake consistency. Folded behind a
+                // disclosure — same reasoning as Night Metrics' old Secondary Insights. Rest's own trend
+                // card was dropped (2026-08) — Rest already has a full-history trend on its own
+                // vital_detail page.
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item {
                     ExpandableSectionHeader(
@@ -644,6 +643,8 @@ fun SleepScreen(
                     item { SleepDebtLedgerCard(m.sleepDebtLedger) }
                     item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                     item { HoursVsNeededCard(m) }
+                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                    item { SleepConsistencyCard(sleeps, habitualMidsleep) }
                 }
             }
         }
@@ -2734,6 +2735,187 @@ private fun LegendDot(label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metrics.space4)) {
         Box(modifier = Modifier.size(Metrics.space6).clip(RoundedCornerShape(50)).background(color))
         Text(label, style = NoopType.footnote, color = Palette.textTertiary)
+    }
+}
+
+// MARK: - Sleep Consistency card
+
+/** One night's bed/wake fold for [SleepConsistencyCard], memoized off `sleeps` (#perf). */
+private data class SleepNightTiming(val label: String, val bedHour: Float, val wakeHour: Float)
+
+/**
+ * Sleep-consistency chart: for the trailing 14 sessions, draws each night's bed→wake window
+ * as a vertical bar against a time-of-day axis, with dashed overlays at the typical bed and
+ * wake times. The headline score is the share of nights whose bed AND wake fell within 45 min
+ * of the personal typical. (PR #260)
+ */
+@Composable
+internal fun SleepConsistencyCard(sleeps: List<SleepSession>, habitualMidsleepSec: Long? = null) {
+    // #perf: building the per-night fold allocates 2 Calendars + a SimpleDateFormat per session (~28
+    // objects for 14 nights). It's a pure derivation of `sleeps` (no wall-clock input), so memoize it on
+    // `sleeps` — scrolling the Sleep screen then reuses it instead of rebuilding it every recompose frame.
+    val timings = remember(sleeps, habitualMidsleepSec) {
+        val sdf = SimpleDateFormat("EEE", Locale.US)
+        // #699: bridged bed→wake spans (one per day, night-tail fragments folded in), not raw sessions —
+        // see consistencyNightSpans.
+        consistencyNightSpans(sleeps, habitualMidsleepSec).map { (onsetTs, wakeTs) ->
+            val bedCal = Calendar.getInstance().apply { timeInMillis = onsetTs * 1000L } // edited bedtime (PR #395)
+            val wakeCal = Calendar.getInstance().apply { timeInMillis = wakeTs * 1000L }
+            val bedH = bedCal.get(Calendar.HOUR_OF_DAY) + bedCal.get(Calendar.MINUTE) / 60f
+            // Fold an evening bedtime to a negative hour so it sorts ABOVE the next-day wake on the axis.
+            val bedNorm = if (bedH > 12f) bedH - 24f else bedH
+            val wakeH = wakeCal.get(Calendar.HOUR_OF_DAY) + wakeCal.get(Calendar.MINUTE) / 60f
+            SleepNightTiming(sdf.format(Date(wakeTs * 1000L)), bedNorm, wakeH)
+        }
+    }
+    if (timings.size < 3) return
+
+    fun sd(vals: List<Float>): Float {
+        val m = vals.average().toFloat()
+        return kotlin.math.sqrt(vals.sumOf { ((it - m) * (it - m)).toDouble() }.toFloat() / vals.size)
+    }
+    val bedSdH = sd(timings.map { it.bedHour })
+    val wakeSdH = sd(timings.map { it.wakeHour })
+    val typicalBed = timings.map { it.bedHour }.average().toFloat()
+    val typicalWake = timings.map { it.wakeHour }.average().toFloat()
+    // Count nights where bed AND wake are within 45 min of the typical.
+    val threshold = 0.75f
+    val consistentNights = timings.count { t ->
+        abs(t.bedHour - typicalBed) <= threshold && abs(t.wakeHour - typicalWake) <= threshold
+    }
+    val consistencyPct = (consistentNights.toFloat() / timings.size * 100f).coerceIn(0f, 100f)
+    val typicalBedLabel = run {
+        val h = ((typicalBed + 24f) % 24f).toInt()
+        String.format(Locale.US, "%02d:00", h)
+    }
+    val typicalWakeLabel = String.format(Locale.US, "%02d:00", typicalWake.toInt().coerceIn(0, 23))
+
+    // Y from −4h (20:00) to 18h (18:00 next day) — matches the 6 PM sensor-read window cap.
+    val yMin = -4f; val yMax = 18f; val yRange = yMax - yMin
+
+    fun hourToLabel(h: Float): String {
+        val norm = ((h % 24f) + 24f) % 24f
+        return String.format(Locale.US, "%02d:00", norm.toInt())
+    }
+
+    NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            // Header: title + trend-score. 2026-08: dropped the "Schedule" overline and the "Sleep window
+            // over recent nights" subtitle — same "single quiet title" treatment as Sleep debt/Night
+            // Metrics elsewhere in this pass.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Consistency",
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(uiString(R.string.l10n_sleep_screen_consistencypct_roundtoint_b23a9d40, consistencyPct.roundToInt()), style = NoopType.chartValue, color = Palette.restColor)
+            }
+
+            // Canvas chart — clipped so bars never bleed outside the 160dp box. The nightly
+            // sleep-window bars + wake marker read in the Rest world's indigo; the bed marker keeps
+            // the periwinkle (metricPurple) so the two overlays stay distinguishable. (Bevel)
+            val accentColor = Palette.restColor
+            val purpleColor = Palette.metricPurple
+            val hairlineColor = Palette.hairline
+            val labelArgb = Palette.textTertiary.toArgb()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clip(RoundedCornerShape(Metrics.cornerSm))
+                    .semantics { contentDescription = uiString(R.string.l10n_sleep_screen_sleep_consistency_nightly_bed_and_wake_14526f89) }
+                    .drawBehind {
+                        val yAxisW = 52f
+                        val chartW = size.width - yAxisW
+                        val chartH = size.height
+
+                        val gridHours = listOf(-4f, 0f, 4f, 8f, 12f, 16f)
+                        // The top "20:00" was drawn at x=0 with its baseline pinned to y=20, so its
+                        // glyphs bled above the chart top and into the card's rounded top-left corner and
+                        // got cropped (#443). Fix: a smaller label that fits the 52px gutter, and a
+                        // baseline that's CENTRED on each gridline then clamped so the full glyph
+                        // (ascent..descent) clears the rounded corners (cornerSm, in px) top and bottom.
+                        val cornerPx = Metrics.cornerSm.toPx()
+                        val paint = android.graphics.Paint().apply {
+                            color = labelArgb
+                            textSize = 20f
+                            isAntiAlias = true
+                        }
+                        val fm = paint.fontMetrics
+                        gridHours.forEach { h ->
+                            val y = (chartH * ((h - yMin) / yRange)).coerceIn(0f, chartH)
+                            drawLine(color = hairlineColor, start = Offset(yAxisW, y), end = Offset(size.width, y), strokeWidth = 1f)
+                            val baseline = (y - (fm.ascent + fm.descent) / 2f)
+                                .coerceIn(cornerPx - fm.ascent, chartH - fm.descent)
+                            // Small left inset (4px) keeps the text off the very edge; at these clamped
+                            // baselines every label sits clear of the rounded corner arc.
+                            drawContext.canvas.nativeCanvas.drawText(hourToLabel(h), 4f, baseline, paint)
+                        }
+
+                        // Per-night bars (bed → wake), coordinates clamped to [0, chartH].
+                        val barW = (chartW / timings.size * 0.6f).coerceAtLeast(4f)
+                        val step = chartW / timings.size
+                        timings.forEachIndexed { i, t ->
+                            val cx = yAxisW + step * i + step / 2f
+                            val rawBedY = chartH * ((t.bedHour - yMin) / yRange)
+                            val rawWakeY = chartH * ((t.wakeHour - yMin) / yRange)
+                            val topY = minOf(rawBedY, rawWakeY).coerceIn(0f, chartH)
+                            val botY = maxOf(rawBedY, rawWakeY).coerceIn(0f, chartH)
+                            val barH = (botY - topY).coerceAtLeast(4f)
+                            drawRoundRect(
+                                color = accentColor.copy(alpha = 0.65f),
+                                topLeft = Offset(cx - barW / 2f, topY),
+                                size = Size(barW, barH),
+                                cornerRadius = CornerRadius(barW / 4f),
+                            )
+                        }
+
+                        // Dashed typical bed (purple) / wake (accent) overlay lines.
+                        val dashLen = 12f; val gapLen = 8f
+                        listOf(typicalBed to purpleColor, typicalWake to accentColor).forEach { (h, col) ->
+                            val y = (chartH * ((h - yMin) / yRange)).coerceIn(0f, chartH)
+                            var x = yAxisW
+                            while (x < size.width) {
+                                drawLine(col.copy(alpha = 0.7f), Offset(x, y), Offset(minOf(x + dashLen, size.width), y), strokeWidth = 2f)
+                                x += dashLen + gapLen
+                            }
+                        }
+                    },
+            ) {}
+
+            // X-axis day labels (first, mid, last).
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 52.dp)) {
+                val xLabels = listOf(
+                    timings.firstOrNull()?.label.orEmpty(),
+                    timings.getOrNull(timings.size / 2)?.label.orEmpty(),
+                    timings.lastOrNull()?.label.orEmpty(),
+                )
+                xLabels.forEach { lbl ->
+                    Text(lbl, style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.weight(1f))
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                LegendDot("Typical bedtime  $typicalBedLabel", Palette.metricPurple)
+                LegendDot("Wake  $typicalWakeLabel", Palette.restColor)
+            }
+
+            Hairline()
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "Score" to "${consistencyPct.roundToInt()}%",
+                    "Typical" to "${((bedSdH + wakeSdH) / 2f * 60f).roundToInt()} min SD",
+                    "Nights" to "${timings.size}",
+                ).forEach { (lbl, v) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(lbl, color = Palette.textTertiary)
+                        Text(v, style = NoopType.captionNumber, color = Palette.textPrimary)
+                    }
+                }
+            }
+        }
     }
 }
 
