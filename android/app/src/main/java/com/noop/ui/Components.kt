@@ -301,7 +301,7 @@ fun SectionHeader(
 @Composable
 fun ExpandableSectionHeader(
     title: String,
-    overline: String,
+    overline: String? = null,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -319,7 +319,7 @@ fun ExpandableSectionHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Overline(overline)
+            if (overline != null) Overline(overline)
             Text(title, style = NoopType.title2, color = Palette.textPrimary)
         }
         Icon(
