@@ -246,7 +246,8 @@ private data class TodayLiveSnapshot(
 @Composable
 fun TodayScreen(
     viewModel: AppViewModel,
-    onQuickActions: () -> Unit = {},
+    // 2026-08 audit: the "+" quick-actions trigger moved off Today's own header into a floating action
+    // button hosted by AppRoot's Scaffold — this callback is no longer threaded through Today at all.
     updateStore: UpdateStore? = null,
     onOpenUpdates: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -1100,15 +1101,13 @@ fun TodayScreen(
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         item {
-        // LIQUID Today header (iOS LiquidTodayView.scene parity), a full structural rebuild to mirror the
-        // iOS liquid Today element-for-element (NOT the old numeric-date + recording-light + bell header):
-        //   LEFT  — a tappable title block: the big rounded-bold day title ("Today" / "Yesterday" / the
-        //           weekday) over a human date line ("Friday, 3 July"). Tap opens the day picker.
-        //   RIGHT — exactly the iOS four controls, in order: a filled HEART (→ Support), the PROFILE
-        //           AVATAR (→ Settings), a "+" ADD button (→ quick actions), and the strap BATTERY RING.
-        // The recording-status light and the notifications BELL are GONE from the header (iOS has neither);
-        // the Updates inbox is relocated into the "+" quick-actions sheet (AppRoot), so the feature stays one
-        // tap away without sitting in the Today header. Staggered in as the first section (index 0).
+        // LIQUID Today header. 2026-08 audit: pared down from a 5-element row (title, date, sync chip,
+        // avatar, +, battery) that read as crowded. LEFT — the big rounded-bold day title ("Today" /
+        // "Yesterday" / the weekday); tap opens the day picker (the date itself is no longer written out
+        // beside it — still reachable the same tap). RIGHT — a sync-status chip (only when there's
+        // something active to report) and the strap battery ring. The profile avatar is gone (Settings is
+        // reached via More) and the "+" moved to a floating action button in AppRoot's Scaffold, docked
+        // above the bottom bar. Staggered in as the first section (index 0).
         val dayTitle = when (selectedDayOffset) {
             0 -> "Today"
             1 -> "Yesterday"
@@ -1124,15 +1123,6 @@ fun TodayScreen(
             val keyDate = runCatching { LocalDate.parse(selectedDayKey) }.getOrNull() ?: selectedDay
             keyDate.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.US))
         }
-        // 2026-08 audit: terse "8 Aug" form for the date pill beside the title (design "C" from the
-        // mockup round) — the weekday name is dropped from the VISIBLE text since dayTitle already
-        // names the day ("Today"/"Yesterday"/the weekday itself for older days); humanDate (the full
-        // "Saturday, 8 August") stays as the semantics contentDescription so screen readers still get
-        // the complete date.
-        val humanDateShort = run {
-            val keyDate = runCatching { LocalDate.parse(selectedDayKey) }.getOrNull() ?: selectedDay
-            keyDate.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
-        }
         // #486: header + wordmark + Arrange fold into ONE compact top cluster. Previously the decorative
         // "N O O P" wordmark and the pinned "Arrange" affordance were each their own full-width list item,
         // so the scaffold's 12dp rowSpacing left two near-empty sky bands stacked under the header ("empty
@@ -1146,7 +1136,6 @@ fun TodayScreen(
             LiquidTodayHeader(
                 dayTitle = dayTitle,
                 humanDate = humanDate,
-                humanDateShort = humanDateShort,
                 selectedDay = selectedDay,
                 batteryPct = if (liveSnap.connected) liveSnap.batteryPct else null,
                 backfilling = liveSnap.backfilling,
@@ -1154,8 +1143,6 @@ fun TodayScreen(
                 lastSyncAt = liveSnap.lastSyncAt,
                 historySyncExperimental = liveSnap.historySyncExperimental,
                 onPickDay = { offset -> selectedDayOffset = offset },
-                onQuickActions = onQuickActions,
-                onOpenSettings = onOpenSettings,
                 onOpenDevices = onOpenDevices,
             )
             // The decorative centred "N O O P" wordmark used to sit here. Removed: it was a full row of
@@ -1870,35 +1857,6 @@ private fun TodayCardDismissButton(onClick: () -> Unit, modifier: Modifier = Mod
     }
 }
 
-@Composable
-private fun QuickActionDisc(onClick: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = Modifier
-            // 34dp to sit level with the heart / avatar / battery ring in the liquid header cluster.
-            .size(34.dp)
-            .liquidPress(interaction)
-            .clip(CircleShape)
-            // A translucent-white disc so the + reads on the day-of-sky like the rest of the liquid cluster,
-            // with a crisp white glyph. Mirrors iOS LiquidAddButton (a "plus" on Circle().fill(.white@0.16)).
-            .background(Color.White.copy(alpha = 0.16f))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
-            .semantics { contentDescription = uiString(R.string.l10n_today_screen_quick_actions_e47e8042) },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(16.dp),
-        )
-    }
-}
-
 // MARK: - Scoring-guide affordances (ⓘ + first-run card)
 
 /**
@@ -1974,20 +1932,19 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
     }
 }
 
-// MARK: - Liquid Today header (iOS LiquidTodayView.scene parity)
-//
-// A STRUCTURAL rebuild to mirror the iOS liquid Today header element-for-element (NOT the old numeric-date +
-// recording-light + bell header). LEFT: a tappable title block — the big rounded-bold day title over a human
-// date line ("Friday, 3 July"), tap opens the day picker. RIGHT: exactly the iOS four controls, in order —
-// a filled HEART (→ Support), the PROFILE AVATAR (→ Settings), a "+" ADD button (→ quick actions), and the
-// strap BATTERY RING (→ Devices). Each ~34dp, spacing ~8dp. There is no recording light and no bell here;
-// iOS's Today header has neither, and the Updates inbox is relocated into the "+" quick-actions sheet.
+// MARK: - Liquid Today header
+
+// 2026-08 audit: LEFT — a tappable title block, just the big rounded-bold day title (no date line/pill
+// beside it anymore); tap opens the day picker, same as before. RIGHT — a sync-status chip (only while
+// there's something active to report — an offload in progress, or a fresh 5/MG with no completed history
+// sync yet) and the strap battery ring (→ Devices). The profile avatar (→ Settings) and the "+" quick-
+// actions disc are both gone from this row — Settings is reached via More, and "+" is now a floating
+// action button in AppRoot's Scaffold, docked above the bottom bar.
 
 @Composable
 private fun LiquidTodayHeader(
     dayTitle: String,
     humanDate: String,
-    humanDateShort: String,
     selectedDay: LocalDate,
     batteryPct: Double?,
     // #245: sync state for the compact header chip (twin of iOS SyncStatusChip).
@@ -1996,8 +1953,6 @@ private fun LiquidTodayHeader(
     lastSyncAt: Long? = null,
     historySyncExperimental: Boolean = false,
     onPickDay: (Int) -> Unit,
-    onQuickActions: () -> Unit,
-    onOpenSettings: () -> Unit,
     onOpenDevices: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2036,12 +1991,24 @@ private fun LiquidTodayHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // LEFT: the tappable title block — 2026-08 audit ("design C" from the mockup round): the day
-        // title beside a small calendar-icon pill carrying the terse date ("8 Aug"), replacing the old
-        // two-line title-over-date-line stack. Taps open the day picker; a horizontal swipe across the
-        // dashboard still changes the day. weight(1f) so the title claims the leading room and never
-        // pushes the trailing control cluster.
-        Row(
+        // LEFT: the tappable title block — 2026-08 audit: dropped the date pill entirely (it used to
+        // sit beside the title; before that, a full "Saturday, 8 August" line under it). Tapping "Today"
+        // still opens the day picker exactly as before — the date was always reachable there, this just
+        // stops writing it out beside the title too. weight(1f) so the title claims the leading room and
+        // never pushes the trailing control cluster.
+        Text(
+            dayTitle,
+            // ~28sp Bold rounded, matching iOS `StrandFont.rounded(28)`. A soft shadow so it reads on the
+            // day-of-sky. NoopType.number is the house tabular sans; Bold at 28 is the display day title.
+            style = NoopType.number(28f, weight = FontWeight.Bold)
+                .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.4f), offset = Offset(0f, 1f), blurRadius = 10f)),
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            // fill = true (the default): this Text's Row-assigned box stretches to claim ALL space up to
+            // the trailing controls, so the title only truncates if it genuinely can't fit — not an
+            // artificial split with a competing element (the exact bug just fixed in the Synthesis
+            // card's greeting: two weight(1f) siblings evenly halve the space regardless of need).
             modifier = Modifier
                 .weight(1f)
                 // #492: NO rounded clip here. With indication = null there's no ripple to shape, and the
@@ -2054,73 +2021,24 @@ private fun LiquidTodayHeader(
                     onClick = { showPicker = true },
                 )
                 .semantics { contentDescription = uiString(R.string.l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96, dayTitle, humanDate) },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                dayTitle,
-                // ~28sp Bold rounded, matching iOS `StrandFont.rounded(28)`. A soft shadow so it reads on the
-                // day-of-sky. NoopType.number is the house tabular sans; Bold at 28 is the display day title.
-                style = NoopType.number(28f, weight = FontWeight.Bold)
-                    .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.4f), offset = Offset(0f, 1f), blurRadius = 10f)),
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.14f))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            ) {
-                Icon(
-                    Icons.Filled.CalendarMonth,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.size(13.dp),
-                )
-                Text(
-                    humanDateShort,
-                    style = NoopType.caption,
-                    color = Color.White.copy(alpha = 0.85f),
-                    maxLines = 1,
-                )
-            }
-        }
+        )
 
-        // RIGHT: the controls, in order — [sync chip] · avatar · + · battery ring. Each ~34dp, 8dp apart.
+        // RIGHT: the controls — [sync chip, only while there's something to report] · battery ring.
+        // 2026-08 audit: dropped the profile avatar (Settings is reached via More now) and the "+" disc
+        // (moved to a floating action button in AppRoot's Scaffold, docked above the bottom bar).
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // #245: compact sync-status chip, shown for EVERY user — syncing / last-synced / experimental,
-            // so the absence of active syncing reads as caught-up (the full SyncingHistoryNote is gated on
-            // recovery == null). Twin of iOS SyncStatusChip.
+            // #245 (2026-08 audit: narrowed) — the chip now only appears while there's something ACTIVE
+            // to report (offload in progress, or a fresh 5/MG with no completed history sync yet); the
+            // routine "Synced Xm ago" steady state no longer occupies the header permanently. See
+            // SyncStatusChip's own `when` for the states this actually renders now.
             SyncStatusChip(
                 backfilling = backfilling, chunks = syncChunksThisSession,
                 lastSyncAt = lastSyncAt, historySyncExperimental = historySyncExperimental,
             )
-            // (a) Profile avatar (the photo set in Settings, or the NOOP loop mark) → Settings. Mirrors iOS.
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onOpenSettings,
-                    )
-                    .semantics { contentDescription = uiString(R.string.l10n_today_screen_profile_and_settings_9b3d12f2) },
-                contentAlignment = Alignment.Center,
-            ) {
-                ProfileAvatar(size = 34.dp)
-            }
-            // (b) Quick-add (+), the accented primary. Mirrors iOS's LiquidAddButton (a glyph on a translucent
-            // disc → the quick-actions menu). Sized 34dp to match the rest of the liquid cluster.
-            QuickActionDisc(onClick = onQuickActions)
-            // (c) Strap battery ring showing the % (iOS LiquidBatteryButton). Tap → Devices.
+            // Strap battery ring showing the % (iOS LiquidBatteryButton). Tap → Devices.
             LiquidBatteryRing(batteryPct = batteryPct, onClick = onOpenDevices)
         }
     }
@@ -2156,9 +2074,12 @@ private fun SyncStatusChip(
         is SyncChipState.Syncing -> ChipCapsule(
             Icons.Filled.Autorenew, "${state.chunks}", Palette.accent,
             uiString(R.string.l10n_today_screen_sync_chip_syncing_desc_bfc290e7, state.chunks))
-        is SyncChipState.Synced -> ChipCapsule(
-            Icons.Filled.Check, state.agoText, Palette.textSecondary,
-            uiString(R.string.l10n_today_screen_sync_chip_synced_desc_4d255944, state.agoText))
+        // 2026-08 audit: the routine "Synced Xm ago" steady state no longer renders a chip at all — it
+        // was sitting in the header all day saying nothing more than "everything is fine", which isn't
+        // worth a permanent slot in an already-crowded row. The chip now only appears for states that
+        // are actually telling you something is HAPPENING (an active offload) or something you'd want
+        // to know about your setup (a fresh 5/MG with no completed history sync yet).
+        is SyncChipState.Synced -> Unit
         SyncChipState.ExperimentalLive -> ChipCapsule(
             Icons.Filled.Check, uiString(R.string.l10n_today_screen_sync_chip_live_98aadb37), Palette.textSecondary,
             uiString(R.string.l10n_today_screen_sync_chip_experimental_desc_3de06a70))

@@ -32,12 +32,13 @@ object AutoWorkoutDetectorTrace {
         gravity: List<GravitySample> = emptyList(),
         savedWorkouts: List<Pair<Long, Long>> = emptyList(),
         path: String = "autoDetect",
+        sensitivity: AutoWorkoutDetector.Sensitivity = AutoWorkoutDetector.Sensitivity.HIGH,
     ): Pair<List<AutoWorkoutDetector.DetectedWorkout>, List<String>> {
         // The result the Today card reads, verbatim, so the trace cannot diverge from it.
-        val results = AutoWorkoutDetector.detect(hr, restingHR, gravity, savedWorkouts)
+        val results = AutoWorkoutDetector.detect(hr, restingHR, gravity, savedWorkouts, sensitivity)
 
         val lines = ArrayList<String>()
-        val floor = (restingHR ?: AutoWorkoutDetector.defaultRestingHR) + AutoWorkoutDetector.elevatedMarginBPM
+        val floor = (restingHR ?: AutoWorkoutDetector.defaultRestingHR) + sensitivity.elevatedMarginBPM
         val hasMotion = gravity.isNotEmpty()
 
         lines.add(
@@ -47,8 +48,10 @@ object AutoWorkoutDetectorTrace {
                 "savedSpans=${savedWorkouts.size}",
         )
         lines.add(
-            "autoDetect thresholds elevatedMargin=${AutoWorkoutDetector.elevatedMarginBPM}bpm " +
-                "minSustainedMin=${AutoWorkoutDetector.minSustainedMin} maxDipS=${AutoWorkoutDetector.maxDipS} " +
+            // Line SHAPE stays byte-aligned with the pinned test + the Swift twin (2026-08 audit: only
+            // the elevatedMargin/minSustainedMin NUMBERS now vary by sensitivity, not the format).
+            "autoDetect thresholds elevatedMargin=${sensitivity.elevatedMarginBPM}bpm " +
+                "minSustainedMin=${sensitivity.minSustainedMin} maxDipS=${AutoWorkoutDetector.maxDipS} " +
                 "mergeGapS=${AutoWorkoutDetector.mergeGapS} motionConfirmMean=${AutoWorkoutDetector.motionConfirmMean}",
         )
 
@@ -65,7 +68,7 @@ object AutoWorkoutDetectorTrace {
         var dipStart: Long? = null
         fun closeSpan() {
             val s = spanStart
-            if (s != null && (spanEnd - s) >= AutoWorkoutDetector.minSustainedMin * 60.0) spans.add(s to spanEnd)
+            if (s != null && (spanEnd - s) >= sensitivity.minSustainedMin * 60.0) spans.add(s to spanEnd)
             spanStart = null
             dipStart = null
         }
@@ -84,7 +87,7 @@ object AutoWorkoutDetectorTrace {
         if (spans.isEmpty()) {
             lines.add(
                 "autoDetect why=noSustainedSpan " +
-                    "(no contiguous run held >=${AutoWorkoutDetector.minSustainedMin}min above ${floor}bpm)",
+                    "(no contiguous run held >=${sensitivity.minSustainedMin}min above ${floor}bpm)",
             )
             lines.add("autoDetect result windows=0")
             return results to lines

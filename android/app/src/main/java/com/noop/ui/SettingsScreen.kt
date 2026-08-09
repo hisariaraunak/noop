@@ -2321,7 +2321,7 @@ fun SettingsScreen(
                 RowDivider()
                 ToggleRow(
                     title = uiString(R.string.l10n_settings_screen_auto_detect_workouts_bed4cf2a),
-                    detail = "After a sync, NOOP looks over your recent heart rate for a sustained, raised stretch that looks like exercise and offers to save it. It only ever suggests. Nothing is saved until you tap Save, and you can dismiss any suggestion. Deliberately conservative, so the odd workout may be missed. On this phone only.",
+                    detail = "After a sync, NOOP looks over your recent heart rate for a sustained, raised stretch that looks like exercise and offers to save it. It only ever suggests. Nothing is saved until you tap Save, and you can dismiss any suggestion. How easily it suggests one is set by \"Workout detection sensitivity\" below. On this phone only.",
                     checked = autoDetectWorkouts,
                     onCheckedChange = {
                         autoDetectWorkouts = it
@@ -2349,10 +2349,17 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                // Workout auto-detection sensitivity: how easily the always-on background detector
-                // (WorkoutDetector, runs every sync — distinct from the opt-in "Auto-detect workouts"
-                // Today-card toggle above) qualifies a bout as a workout. Low = fewest false positives
-                // (needs a longer, more clearly elevated effort); High = the original, looser behaviour.
+                // Workout auto-detection sensitivity: how easily a bout qualifies as a workout. Low =
+                // fewest false positives (needs a longer, more clearly elevated effort); High = each
+                // detector's original, looser behaviour.
+                //
+                // 2026-08 audit: now shared by BOTH detectors — the always-on background detector
+                // (WorkoutDetector, runs every sync, writes "Detected" rows straight into Workouts)
+                // AND the opt-in "Auto-detect workouts" Today-card suggestion above (AutoWorkoutDetector,
+                // never writes without a tap). They stay separate algorithms (see AutoWorkoutDetector's
+                // class doc) with their own tuned Low/Medium/High numbers, but one dial now governs both
+                // — previously this control only touched the background detector, and the Today card's
+                // suggestion ran at fixed, always-loose thresholds no Settings control could touch.
                 FormRow(label = "Workout detection sensitivity") {
                     SegmentedPillControl(
                         items = listOf(
@@ -2375,7 +2382,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    text = "How easily a sustained, elevated stretch of activity gets auto-detected as a workout. Lower is stricter and misses more borderline activity; higher catches more but risks the odd false positive. Applies on the next sync.",
+                    text = "How easily a sustained, elevated stretch of activity gets auto-detected as a workout, or suggested as one on Today. Lower is stricter and misses more borderline activity; higher catches more but risks the odd false positive. The background detector applies on the next sync; the Today suggestion applies the next time it re-scans.",
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                 )

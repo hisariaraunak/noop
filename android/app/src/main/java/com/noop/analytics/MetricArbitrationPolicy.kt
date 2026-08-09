@@ -114,13 +114,20 @@ object MetricArbitrationPolicy {
             }
 
         MetricKind.CALORIES ->
-            // Active energy is an estimate everywhere; phone aggregate slightly over a strap estimate.
+            // Active energy is an estimate everywhere, but a phone aggregate can only count a workout
+            // if the phone was actually carried through it — for a strap-only workout (2026-08: user
+            // confirmed they never carry their phone during a session) Health Connect/Apple Health
+            // silently under-count instead of erroring, which reads as a legitimate but wrong number.
+            // A worn-device estimate (WHOOP's own reported energy, NOOP's on-device HR estimate, or a
+            // band's own estimate) is always present for the actual activity window, so it now outranks
+            // the phone aggregate for this metric specifically (every other metric keeps phone below
+            // worn sensors already; calories is the one family where it was inverted).
             when (source) {
-                FusionSource.APPLE_HEALTH -> 2
-                FusionSource.HEALTH_CONNECT -> 2
-                FusionSource.WHOOP_IMPORT -> 3
-                FusionSource.NOOP_COMPUTED -> 3
-                FusionSource.XIAOMI_BAND -> 3
+                FusionSource.WHOOP_IMPORT -> 2
+                FusionSource.NOOP_COMPUTED -> 2
+                FusionSource.XIAOMI_BAND -> 2
+                FusionSource.APPLE_HEALTH -> 3
+                FusionSource.HEALTH_CONNECT -> 3
                 FusionSource.NUTRITION_CSV -> 3
                 FusionSource.LOCAL_CACHE -> 3
             }
@@ -179,6 +186,18 @@ object MetricArbitrationPolicy {
             return "phone sleep buckets"
         }
         if (metric == MetricKind.SKIN_TEMP) return "worn sensor"
+
+        // Calories: tier 2 is now the worn-device estimate (see [tier]), not a phone aggregate, so the
+        // generic tier→text fallback below would mislabel it — spell out each source explicitly instead.
+        if (metric == MetricKind.CALORIES) {
+            return when (source) {
+                FusionSource.WHOOP_IMPORT -> "strap-reported"
+                FusionSource.NOOP_COMPUTED -> "computed on device"
+                FusionSource.XIAOMI_BAND -> "band estimate"
+                FusionSource.APPLE_HEALTH, FusionSource.HEALTH_CONNECT -> "phone aggregate"
+                FusionSource.NUTRITION_CSV, FusionSource.LOCAL_CACHE -> "estimate"
+            }
+        }
 
         return when (tier(metric, source)) {
             0 -> "direct sensor"

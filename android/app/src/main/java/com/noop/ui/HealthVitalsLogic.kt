@@ -291,3 +291,10 @@ internal fun asOfLabel(day: String?): String? {
         else -> "as of ${date.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))}"
     }
 }
+
+/** Bare "Today" / "Yesterday" / "3 Aug" — the same relative-day logic as [asOfLabel] without its
+ *  "as of " prefix, for chart headers that show the day as a standalone caption under the value
+ *  rather than a sentence. Never dishonest about stale data: only reads "Today" when the latest
+ *  point actually is today, else falls back to "Yesterday" or the real date. */
+internal fun relativeDayShort(day: String): String =
+    asOfLabel(day)?.removePrefix("as of ")?.replaceFirstChar { it.uppercase() } ?: day

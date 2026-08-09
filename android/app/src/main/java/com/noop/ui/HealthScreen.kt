@@ -1786,14 +1786,13 @@ fun VitalDetailScreen(
                 val one = detail.points.last()   // size 1: the single reading (last == the latest)
                 NoopCard {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Overline("Latest")
                         Text(
                             text = uiString(R.string.l10n_health_screen_detail_format_one_second_detail_unit_6fde90d3, detail.format(one.second), detail.unit).trim(),
                             style = NoopType.chartValueLarge,
                             color = detail.color,
                         )
                         Text(
-                            text = uiString(R.string.l10n_health_screen_as_of_one_first_2b409612, one.first),
+                            text = relativeDayShort(one.first),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )
@@ -1840,27 +1839,23 @@ fun VitalDetailScreen(
 
         // 2026-08 audit: dropped the SectionHeader that used to sit here (title = detail.title, overline
         // = "Vital Signs") — it verbatim-repeated the ScreenScaffold title one screen-length above, under
-        // a generic overline that named nothing specific. The reading count it carried as `trailing`
-        // moves into this Row instead, so the trend chart follows straight on from the ScreenScaffold
-        // header without a redundant second title in between.
+        // a generic overline that named nothing specific. The trend chart follows straight on from the
+        // ScreenScaffold header without a redundant second title in between.
+        // 2026-08 (chart header trim): dropped the "Latest" overline (the value is self-evidently the
+        // latest one — this card has no other value to distinguish it from) and the "as of" sentence in
+        // favour of a bare relative day (relativeDayShort — same today/yesterday logic as asOfLabel,
+        // just without the "as of " prefix). The reading count moves below the min/avg/max footer
+        // instead of sitting top-right, so the header is just the number, not four competing lines.
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Overline("Latest")
-                        Text(
-                            text = uiString(R.string.l10n_health_screen_detail_format_latest_second_detail_unit_9664278b, detail.format(latest.second), detail.unit).trim(),
-                            style = NoopType.chartValueLarge,
-                            color = detail.color,
-                        )
-                        Text(
-                            text = uiString(R.string.l10n_health_screen_as_of_latest_first_726f20bb, latest.first),
-                            style = NoopType.footnote,
-                            color = Palette.textTertiary,
-                        )
-                    }
+                Column {
                     Text(
-                        "${filteredReadings.size} readings",
+                        text = uiString(R.string.l10n_health_screen_detail_format_latest_second_detail_unit_9664278b, detail.format(latest.second), detail.unit).trim(),
+                        style = NoopType.chartValueLarge,
+                        color = detail.color,
+                    )
+                    Text(
+                        text = relativeDayShort(latest.first),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -1941,6 +1936,11 @@ fun VitalDetailScreen(
                         }
                     }
                 }
+                Text(
+                    "${filteredReadings.size} readings",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
             }
         }
 
@@ -1960,26 +1960,24 @@ fun VitalDetailScreen(
         val readingRows = remember(filteredReadings, detail, strapId) {
             vitalReadingRows(filteredReadings, detail.unit, strapId, detail.format)
         }
-        // The six recovery-chart keys collapse the table behind a "Show readings" link by default (2026-08
-        // declutter pass) — every other vital_detail key keeps it always-visible, unchanged.
-        if (key in RECOVERY_CHART_KEYS) {
-            var showReadings by remember { mutableStateOf(false) }
-            if (showReadings) VitalReadingsTable(rows = readingRows)
-            Text(
-                if (showReadings) "Hide readings" else "Show readings ›",
-                style = NoopType.footnote,
-                color = Palette.accent,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClickLabel = if (showReadings) "Hide readings" else "Show readings") {
-                        showReadings = !showReadings
-                    }
-                    .padding(vertical = Metrics.space8),
-            )
-        } else {
-            VitalReadingsTable(rows = readingRows)
-        }
+        // Every vital_detail key collapses the table behind a "Show readings" link by default (2026-08
+        // declutter pass, originally the six recovery-chart keys only; widened to all keys for
+        // consistency — Effort/Fitness Age/Vitality/Steps/Active Energy used to always show the full
+        // table, which read as an inconsistency once the recovery keys had already been decluttered).
+        var showReadings by remember(key) { mutableStateOf(false) }
+        if (showReadings) VitalReadingsTable(rows = readingRows)
+        Text(
+            if (showReadings) "Hide readings" else "Show readings ›",
+            style = NoopType.footnote,
+            color = Palette.accent,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClickLabel = if (showReadings) "Hide readings" else "Show readings") {
+                    showReadings = !showReadings
+                }
+                .padding(vertical = Metrics.space8),
+        )
 
         // The Effort screen is the "reimagined" home for heart-rate detail (2026-08): today's intraday HR
         // chart moved here off Today's compact HeartRateSummaryRow tap-through, plus a new time-in-zones
@@ -2482,6 +2480,13 @@ private fun EffortHeartRateSection(
     }
 
     SectionHeader(title = "Heart Rate")
+    // 2026-08 fix: this used to `return` here when today's HR hasn't banked enough points yet — which
+    // also skipped EffortZonesSection + EffortTodaysWorkoutsSection below (task #1042), silently hiding
+    // BOTH sections (and any real workouts already logged today) any time the chart itself had nothing
+    // to show. EffortTodaysWorkoutsSection's own doc comment promises "always shown, independent of
+    // Today's own conditional card" — that guarantee only holds if this function keeps going instead of
+    // bailing out. Both trailing sections already render their own "calibrating"/"no workouts" empty
+    // states, so it's safe to always reach them.
     if (winBuckets.size < 2) {
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2498,6 +2503,12 @@ private fun EffortHeartRateSection(
                 )
             }
         }
+        EffortZonesSection(hrSamples = hrSamples, hrMax = profile.hrMax)
+        EffortTodaysWorkoutsSection(
+            workouts = workoutsToday,
+            onOpenWorkout = onOpenWorkout,
+            onSeeAllWorkouts = onSeeAllWorkouts,
+        )
         return
     }
 
@@ -2954,8 +2965,21 @@ private fun buildVitalDetail(
         // up a skin-temp reading yet). Default to absolute mode instead so this always renders a
         // model — an empty-readings day now shows an honest "—" tile like its neighbours, never a
         // vanishing one.
-        val latest = days.asReversed().asSequence().mapNotNull { it.skinTempDevC }.firstOrNull()
-        val absolute = latest?.let { VitalBands.isAbsoluteSkinTemp(it) } ?: true
+        //
+        // Bug fix (2026-08 follow-up): the tile stopped vanishing but kept intermittently showing
+        // "No data" for TODAY specifically. Root cause: skin temp is genuinely bimodal per day across
+        // a merged dataset — a WHOOP CSV import stores absolute °C (~33-36), the on-device pipeline
+        // and an Oura import store a small ±°C deviation (see VitalBands.isAbsoluteSkinTemp's own doc
+        // comment) — and `absolute` used to be picked from whichever day was the most recently
+        // NON-NULL entry, not necessarily today. If today's own reading hadn't synced yet at the
+        // moment this ran, that scan fell back to an OLDER day's shape; once today's reading DID
+        // arrive in a different shape, it got silently excluded by the `readings` filter below,
+        // showing "No data" despite a real value existing. Fixed by deriving the mode from TODAY's
+        // OWN value (falling back to absolute only when today truly has none), matching the already-
+        // correct sibling logic in HealthVitalsLogic.kt's per-day vitals row (`skinIsAbsolute`) —
+        // today's own row can now never be excluded by a mismatch against some other day's shape.
+        val todayValue = days.lastOrNull()?.skinTempDevC
+        val absolute = todayValue?.let { VitalBands.isAbsoluteSkinTemp(it) } ?: true
         val unit = UnitFormatter.temperatureUnit(tempUnit)
         val format: (Double) -> String = { c ->
             val full = if (absolute) {

@@ -58,6 +58,10 @@ import java.util.Locale
  * (× or "Not a workout") → records the window in the durable, SEPARATE [AutoWorkoutPrefs] dismissed set
  * so it never re-prompts. It NEVER creates a workout without the user tapping Save.
  *
+ * 2026-08 audit: how easily a candidate qualifies now follows the Settings "Workout detection
+ * sensitivity" control (`ProfileStore.workoutSensitivity`) — see `autoDetectCandidate`'s mapping onto
+ * [AutoWorkoutDetector.Sensitivity]. Was hardcoded, always the same, regardless of that setting.
+ *
  * Design-Reset compliant: a flat accent-tinted [NoopCard], NoopMetrics tokens, no gold — matching the
  * other Today cards (matches the iOS source exactly).
  */
@@ -229,6 +233,18 @@ private suspend fun autoDetectCandidate(
     val fromSec = nowSec - AUTO_DETECT_DAYS_BACK * 86_400L
     val repo = viewModel.repo
 
+    // 2026-08 audit: this card used to run at fixed, hardcoded thresholds regardless of the
+    // "Workout detection sensitivity" Settings control — reads too trigger-happy on borderline
+    // activity with no way to dial it back. Now shares that ONE Settings value with the always-on
+    // background detector (WorkoutDetector), mapped onto THIS detector's own Sensitivity tiers by
+    // name — same Low=stricter/High=looser meaning, different underlying algorithm (the two stay
+    // deliberately separate; see AutoWorkoutDetector's class doc).
+    val sensitivity = when (ProfileStore.from(context.applicationContext).workoutSensitivity) {
+        com.noop.analytics.WorkoutDetector.Sensitivity.LOW -> AutoWorkoutDetector.Sensitivity.LOW
+        com.noop.analytics.WorkoutDetector.Sensitivity.MEDIUM -> AutoWorkoutDetector.Sensitivity.MEDIUM
+        com.noop.analytics.WorkoutDetector.Sensitivity.HIGH -> AutoWorkoutDetector.Sensitivity.HIGH
+    }
+
     // #767/#717: read HR over the ACTIVE-strap UNION, not the hardcoded "my-whoop" id. A live-BLE strap
     // banks its raw under its OWN fresh id ("whoop-<uuid>", #908), so a read pinned to "my-whoop" finds
     // NOTHING and auto-detect goes silent — even though sleep/charge (which read the union) keep working.
@@ -268,6 +284,7 @@ private suspend fun autoDetectCandidate(
             gravity = emptyList(),
             savedWorkouts = saved,
             path = "autoDetect",
+            sensitivity = sensitivity,
         )
         for (line in trace) viewModel.ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS)
         results
@@ -277,6 +294,7 @@ private suspend fun autoDetectCandidate(
             restingHR = restingHr,
             gravity = emptyList(), // HR-only MVP (matches iOS passing motion: nil)
             savedWorkouts = saved,
+            sensitivity = sensitivity,
         )
     }
     // Drop anything the user already dismissed, then take the most recent. Mirrors iOS exactly.

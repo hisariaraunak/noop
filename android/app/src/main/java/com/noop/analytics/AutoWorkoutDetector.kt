@@ -17,11 +17,15 @@ import kotlin.math.sqrt
  * a workout via a dismissible Today card — it never writes a row on its own. The user taps
  * "Save" to turn a suggestion into a manual workout, or X to dismiss it forever.
  *
- * The thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥12-min
- * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, near windows merged. This
- * is tuned to avoid false positives from stress / caffeine / a brief flight of stairs, at the
- * cost of missing the odd short or gentle session — exactly right for a SUGGESTION you can
- * decline. An OPTIONAL continuous motion signal, when one is readily available, is required as
+ * 2026-08 audit: the elevated-gate margin and minimum-duration gates are now tunable via
+ * [Sensitivity] (were hardcoded 30 bpm / 12 min, always) — the card was too trigger-happy on
+ * borderline activity with no way to dial it back. HIGH reproduces those exact original values
+ * unchanged; MEDIUM and LOW raise the bar. This detector stays its OWN algorithm (not routed
+ * through [WorkoutDetector]'s zone-based logic — the two remain deliberately separate per above),
+ * but shares [WorkoutDetector]'s Settings control and its Low=stricter/High=looser meaning, so the
+ * one dial reads consistently for both. Brief (≤90 s) dips are still tolerated and near windows
+ * still merged regardless of sensitivity — those aren't false-positive levers, just bout-shape
+ * stitching. An OPTIONAL continuous motion signal, when one is readily available, is required as
  * confirmation; with no motion series it runs HR-only.
  *
  * Pure / headless: no Android, no I/O, no clock. Inputs are the Room entities
@@ -30,13 +34,21 @@ import kotlin.math.sqrt
  */
 object AutoWorkoutDetector {
 
+    /**
+     * How easily a sustained HR elevation counts as a workout suggestion (2026-08 audit). HIGH
+     * reproduces the original, always-there thresholds (30 bpm margin, 12 min); MEDIUM and LOW
+     * raise the bar, trading the odd missed session for fewer false "was that a workout?" prompts.
+     * Deliberately mirrors [WorkoutDetector.Sensitivity]'s naming and Low=stricter/High=looser
+     * direction (NOT its numeric values — the two detectors measure different things) so the
+     * shared Settings control means the same thing in both places.
+     */
+    enum class Sensitivity(val elevatedMarginBPM: Int, val minSustainedMin: Double) {
+        LOW(elevatedMarginBPM = 40, minSustainedMin = 18.0),
+        MEDIUM(elevatedMarginBPM = 35, minSustainedMin = 15.0),
+        HIGH(elevatedMarginBPM = 30, minSustainedMin = 12.0),
+    }
+
     // ---- Constants (keep byte-identical with the Swift twin) ----
-
-    /** Elevated gate: bpm must be at least restingHR + this margin to count as "working". */
-    const val elevatedMarginBPM: Int = 30
-
-    /** A candidate must hold the elevated gate for a contiguous span of at least this long. */
-    const val minSustainedMin: Double = 12.0
 
     /** A dip below the gate no longer than this does NOT break the span (a red light, a sip of water). */
     const val maxDipS: Long = 90L
@@ -99,13 +111,13 @@ object AutoWorkoutDetector {
     /**
      * Detect candidate sustained-elevated-HR workout windows.
      *
-     * Algorithm (kept byte-identical with the Swift twin):
-     *  1. Sort HR ascending. Floor = restingHR + [elevatedMarginBPM]. Walk the samples; a sample is
-     *     "elevated" when bpm >= floor.
+     * Algorithm (kept byte-identical with the Swift twin at the [Sensitivity.HIGH] tier):
+     *  1. Sort HR ascending. Floor = restingHR + [Sensitivity.elevatedMarginBPM]. Walk the samples;
+     *     a sample is "elevated" when bpm >= floor.
      *  2. Grow a contiguous span across elevated samples. A run of NON-elevated samples is tolerated
      *     (does not end the span) ONLY while the dip's wall-clock duration stays <= [maxDipS]; a longer
      *     dip closes the span. The span's [start, end] are the first/last ELEVATED sample timestamps.
-     *  3. Keep a span only when it lasts >= [minSustainedMin].
+     *  3. Keep a span only when it lasts >= [Sensitivity.minSustainedMin].
      *  4. Merge two kept spans when the gap between them is strictly < [mergeGapS].
      *  5. If a motion series is supplied, drop a window unless its mean motion intensity over the window
      *     is >= [motionConfirmMean] (confirmation). With no motion series, HR-only — keep it.
@@ -116,17 +128,20 @@ object AutoWorkoutDetector {
      * @param restingHR the nightly resting HR for the day; null → [defaultRestingHR] (60).
      * @param gravity OPTIONAL continuous motion series for confirmation; empty/omitted → HR-only.
      * @param savedWorkouts already-saved workout windows as (startSec, endSec) pairs to exclude by overlap.
+     * @param sensitivity how easily a bout qualifies; defaults to [Sensitivity.HIGH] (the original,
+     *   always-there thresholds) so every existing caller that doesn't pass this is byte-unchanged.
      */
     fun detect(
         hr: List<HrSample>,
         restingHR: Int? = null,
         gravity: List<GravitySample> = emptyList(),
         savedWorkouts: List<Pair<Long, Long>> = emptyList(),
+        sensitivity: Sensitivity = Sensitivity.HIGH,
     ): List<DetectedWorkout> {
         val seg = cleanHR(hr)
         if (seg.isEmpty()) return emptyList()
 
-        val floor = (restingHR ?: defaultRestingHR) + elevatedMarginBPM
+        val floor = (restingHR ?: defaultRestingHR) + sensitivity.elevatedMarginBPM
 
         // --- 1+2+3: grow sustained spans tolerating brief dips ---
         // A span is [spanStart, spanEnd] over ELEVATED-sample timestamps. `dipStart` marks where the
@@ -138,7 +153,7 @@ object AutoWorkoutDetector {
 
         fun closeSpan() {
             val s = spanStart
-            if (s != null && (spanEnd - s) >= minSustainedMin * 60.0) {
+            if (s != null && (spanEnd - s) >= sensitivity.minSustainedMin * 60.0) {
                 spans.add(s to spanEnd)
             }
             spanStart = null

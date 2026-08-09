@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -79,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -297,16 +301,24 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             containerColor = Palette.surfaceBase,
             bottomBar = {
                 // One unified "glass" bar: four evenly-spaced tabs — Today · Trends · Sleep · More
-                // (matches the iOS FloatingTabBar). The quick-action "+" lives in the Today header's
-                // top-right (balancing the avatar), so the bar is clean tabs only. "More" navigates to
-                // its own page (mirroring the iOS More tab) that reaches every grouped destination, so no
-                // destination is lost without the drawer.
+                // (matches the iOS FloatingTabBar). "More" navigates to its own page (mirroring the iOS
+                // More tab) that reaches every grouped destination, so no destination is lost without
+                // the drawer.
                 GlassBottomBar(
                     current = current,
                     onTabSelected = { dest ->
                         if (dest.route != currentRoute) nav.navigateToTab(dest.route)
                     },
                 )
+            },
+            // 2026-08 audit: the quick-action "+" moved off Today's own header (which was crowded —
+            // title, date, sync chip, avatar, +, battery all in one row) into a floating button here,
+            // docked above the bottom bar by Scaffold's own FAB/bottomBar layout. Only shown on Today,
+            // matching where the "+" lived before — Trends/Sleep/More never had it either.
+            floatingActionButton = {
+                if (current == Destination.Today) {
+                    QuickActionFab(onClick = { showQuickActions = true })
+                }
             },
         ) { inner ->
             NavHost(
@@ -327,9 +339,6 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Today.route) {
                     TodayScreen(
                         viewModel = viewModel,
-                        // The quick-action "+" lives in the Today header's top-right now (off the
-                        // bottom bar) — it opens the same quick-action sheet the bar used to.
-                        onQuickActions = { showQuickActions = true },
                         // The Updates "ringer" — the bell sits before the +, and opens the inbox
                         // sheet AppRoot presents (it owns the nav for deep-links).
                         updateStore = updateStore,
@@ -770,6 +779,53 @@ private val barLeadingTabs = listOf(
 private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
 )
+
+/**
+ * The Today quick-actions floating button (2026-08 audit, replacing the header's old "+" disc). A
+ * custom circle rather than the stock Material3 [androidx.compose.material3.FloatingActionButton] —
+ * M3's FAB defaults to a rounded-SQUARE shape (not a circle), and its `containerColor` only accepts a
+ * flat [Color], not a gradient, so a plain FAB couldn't give either of the two things asked for: an
+ * explicit circle, and a little depth on the fill. 45.dp — 20% down from M3's stock 56.dp FAB size.
+ * The fill layers a solid [Palette.accent] base under a soft vertical light-to-dark wash (white-tinted
+ * highlight at the top edge, a touch of black-tinted shade at the bottom) rather than swapping in a
+ * literal lighter/darker accent color — [Palette.accentHover] is darker than [Palette.accent] in the
+ * LIGHT theme and lighter in DARK (it's tuned for hover/pressed states, not a "top of gradient" role),
+ * so a wash keyed to plain white/black reads as a consistent top-lit disc in both themes automatically.
+ */
+@Composable
+private fun QuickActionFab(onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .size(45.dp)
+            .shadow(6.dp, CircleShape, clip = false)
+            .clip(CircleShape)
+            .background(Palette.accent)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.22f),
+                        Color.Transparent,
+                        Color.Black.copy(alpha = 0.12f),
+                    ),
+                ),
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClickLabel = stringResource(R.string.l10n_today_screen_quick_actions_e47e8042),
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Add,
+            contentDescription = stringResource(R.string.l10n_today_screen_quick_actions_e47e8042),
+            tint = Palette.surfaceBase,
+            modifier = Modifier.size(19.dp),
+        )
+    }
+}
 
 @Composable
 private fun GlassBottomBar(
