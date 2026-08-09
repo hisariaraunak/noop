@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +49,9 @@ import com.noop.analytics.StepsCalibrationPoint
 import com.noop.analytics.StepsCalibrationPointStore
 import com.noop.analytics.StepsCalibrationSource
 import com.noop.analytics.StepsEstimateEngine
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -107,10 +110,12 @@ fun StepsCalibrationScreen(
     // stays reachable; a floor keeps it usable before any fit. Mirrors the macOS sliderMax.
     val stepperMax = maxOf(profile.stepsCalibrationCoefficient, profile.stepsManualCoefficient, 50.0) * 2
 
-    // Build the comparison table + a typical-day motion, once. The engine stores `steps_est` ONLY for
-    // strap-only days (a phone-covered day uses the phone's real count), so an estimate and a phone
-    // count never co-exist in storage. To still SHOW how close the estimate is, we reconstruct what the
-    // estimate WOULD have been on recent phone-covered days: read each day's motion the same way the
+    // Build the comparison table + a typical-day motion, once. The engine now persists `steps_est` for
+    // every recently-scored day regardless of phone coverage (2026-08 , Today prefers the on-device
+    // estimate over a phone import on any day, so an estimate must exist for that to mean anything), but
+    // this screen's comparison table still wants a phone-covered day's estimate reconstructed LIVE rather
+    // than read from storage, so it can't drift from whatever calibration is currently in force (including
+    // an unsaved manual edit the user is actively adjusting): read each day's motion the same way the
     // engine does (gravity over [localMidnight, +24h)) and run the public StepsEstimateEngine with the
     // live calibration. Reuses the engine, never invents a number, needs no extra storage.
     LaunchedEffect(Unit) {
@@ -179,6 +184,7 @@ fun StepsCalibrationScreen(
                 CurrentFitCard(profile, matchedDays = comparison.size)
                 ComparisonCard(comparison)
                 ManualAdjustCard(
+                    vm = vm,
                     profile = profile,
                     stepperMax = stepperMax,
                     sampleMotion = sampleMotion,
@@ -419,6 +425,7 @@ private const val STEPS_COEFFICIENT_STEP = 0.1
  *  nearby value like 1.2 from an auto-fitted 1.4 is two taps, not a drag from zero (#698). */
 @Composable
 private fun ManualAdjustCard(
+    vm: AppViewModel,
     profile: ProfileStore,
     stepperMax: Double,
     sampleMotion: Double?,
@@ -427,10 +434,22 @@ private fun ManualAdjustCard(
     val manual = profile.stepsManualCoefficient
     val effective = if (manual > 0) manual else profile.stepsCalibrationCoefficient
 
+    // 2026-08: rescore right after a manual edit instead of waiting on the periodic loop (its HR-
+    // fingerprint gate never notices a bare coefficient change) or an unrelated sync/edit. Debounced
+    // ~600ms since taps arrive in quick succession — mirrors the walk-calibration flow's own
+    // vm.rescoreStepsCalibration() call (below), just settled rather than immediate.
+    val scope = rememberCoroutineScope()
+    var rescoreJob by remember { mutableStateOf<Job?>(null) }
+
     fun step(delta: Double) {
         val next = (Math.round((effective + delta) * 10) / 10.0).coerceIn(0.0, stepperMax)
         profile.stepsManualCoefficient = next
         onProfileChanged()
+        rescoreJob?.cancel()
+        rescoreJob = scope.launch {
+            delay(600)
+            vm.rescoreStepsCalibration()
+        }
     }
 
     NoopCard(padding = 20.dp) {

@@ -1172,12 +1172,19 @@ object IntelligenceEngine {
                 MetricSeriesRow(deviceId = computedId, day = satKey, key = "body_age", value = vRes.bodyAge)))
         }
 
-        // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, keyed to each strap-only day ──
-        // A WHOOP 4.0 sends no step count over BLE, so for days the phone DIDN'T also count steps we
-        // estimate them: calibrate the strap's daily MOTION VOLUME against the phone's real step count on
-        // the days both exist, then apply that personal coefficient to the strap-only days. Engine =
-        // StepsEstimateEngine (fully unit-tested); this block is pure orchestration , gather points, fit,
-        // store under the same "-noop" source, and hand the fit back to the caller for ProfileStore.
+        // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, computed for every recently-scored day ──
+        // A WHOOP 4.0 sends no step count over BLE, so NOOP estimates steps from the strap's daily MOTION
+        // VOLUME: calibrate that volume against the phone's real step count on the days both exist, then
+        // apply the fitted personal coefficient to every recently-scored day. Engine = StepsEstimateEngine
+        // (fully unit-tested); this block is pure orchestration , gather points, fit, store under the same
+        // "-noop" source, and hand the fit back to the caller for ProfileStore.
+        // 2026-08: the write loop below used to SKIP a day entirely once the phone (Apple Health/Health
+        // Connect) had any step count for it, on the assumption a persisted estimate there would be an
+        // unread no-op since the phone count always won on-screen. That's no longer true , Today now
+        // prefers the on-device estimate over the phone import on every day (TodayScreen.kt), so an
+        // estimate must exist for the phone to ever lose to it. `refStepsByDay` is still used, unchanged,
+        // to pick which days are trustworthy ground truth for FITTING the coefficient itself — only the
+        // write loop's "skip if the phone already has this day" gate was removed.
         // Idempotent: re-upserts the same (computedId, day, "steps_est") rows. Inert until there's a
         // calibration , a single-source / no-phone user sees no estimate until they set a manual `k`.
         // Mirrors the Swift IntelligenceEngine steps-estimate block byte-for-byte (60-day window, the
@@ -1237,10 +1244,10 @@ object IntelligenceEngine {
                 }
             }
         if (stepsCal != null) {
-            // Estimate + upsert for each recent scored day that has motion but NO real phone step count.
+            // Estimate + upsert for every recent scored day that has motion, regardless of whether the
+            // phone also has a step count for it (2026-08 , see the block comment above).
             val estRows = ArrayList<MetricSeriesRow>()
             for (dm in dailies) {
-                if (refStepsByDay.containsKey(dm.day)) continue
                 val motion = motionByDay[dm.day] ?: continue
                 val est = StepsEstimateEngine.estimate(motion, stepsCal) ?: continue
                 estRows.add(MetricSeriesRow(deviceId = computedId, day = dm.day, key = "steps_est", value = est.toDouble()))
@@ -1259,7 +1266,6 @@ object IntelligenceEngine {
             }
             if (stepsCal != null) {
                 for (dm in dailies) {
-                    if (refStepsByDay.containsKey(dm.day)) continue
                     val motion = motionByDay[dm.day] ?: continue
                     val est = StepsEstimateEngine.estimate(motion, stepsCal) ?: continue
                     stepsTraceSink(

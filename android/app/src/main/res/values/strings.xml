@@ -854,7 +854,7 @@
     <string name="l10n_steps_calibration_screen_phone_77064d52">Phone</string>
     <string name="l10n_steps_calibration_screen_shortday_row_day_estimated_row_estimated_f2d71597">%1$s: estimated %2$s steps, phone %3$s </string>
     <string name="l10n_steps_calibration_screen_steps_per_motion_unit_a2c2ac56">steps per motion unit</string>
-    <string name="l10n_steps_calibration_screen_takes_effect_on_the_next_analytics_13205327">Takes effect on the next analytics pass (after the next sync).</string>
+    <string name="l10n_steps_calibration_screen_takes_effect_on_the_next_analytics_13205327">Takes effect within a second.</string>
     <string name="l10n_steps_calibration_screen_these_are_the_days_where_your_ae5c9c2c">These are the days where your phone also counted steps, so NOOP can learn how your motion maps to steps. Or set the coefficient manually below.</string>
     <string name="l10n_steps_calibration_screen_these_days_are_excluded_from_the_6bedabbf">These days are excluded from the estimate (your phone\'s real count is shown instead). They\'re here only so you can judge the estimate\'s accuracy.</string>
     <string name="l10n_steps_calibration_screen_we_re_not_seeing_any_motion_6ac8e092">We\'re not seeing any motion from your strap yet. Steps are estimated from your WHOOP\'s </string>
