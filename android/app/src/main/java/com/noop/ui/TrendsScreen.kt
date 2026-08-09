@@ -7,13 +7,16 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -846,15 +849,36 @@ private fun periodChange(values: List<Double>): Double? {
     return recent.average() - earlier.average()
 }
 
-/** Evenly-spaced labelled stats under a chart, separated by a hairline rule. */
+/** Evenly-spaced labelled stats under a chart, separated by a hairline rule above the row and thin
+ *  vertical dividers between columns (2026-08 redesign, same "option 1" treatment as
+ *  [ChartMinAvgMax]) — the low/high extremes ("Low"/"Peak" here, this screen's own wording for
+ *  min/max) borrow the same cool/warm tint used everywhere else that shows a min or a max. */
 @Composable
 private fun ChartFooter(items: List<Pair<String, String>>) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
         HorizontalDivider(color = Palette.hairline)
-        Row(modifier = Modifier.fillMaxWidth()) {
-            items.forEach { (label, value) ->
-                Column(modifier = Modifier.weight(1f)) {
-                    Overline(label, color = Palette.textTertiary)
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            items.forEachIndexed { index, (label, value) ->
+                if (index > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(Metrics.divider)
+                            .background(Palette.hairline),
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f).padding(start = if (index > 0) 12.dp else 0.dp),
+                    horizontalAlignment = if (label == "Avg") Alignment.CenterHorizontally else Alignment.Start,
+                ) {
+                    Overline(
+                        label,
+                        color = when (label) {
+                            "Min", "Low" -> Palette.metricCyan
+                            "Max", "Peak" -> Palette.metricAmber
+                            else -> Palette.textTertiary
+                        },
+                    )
                     Text(value, style = NoopType.bodyNumber, color = Palette.textPrimary)
                 }
             }

@@ -1920,22 +1920,11 @@ fun VitalDetailScreen(
                         .height(Metrics.divider)
                         .background(Palette.hairline),
                 )
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    listOf(
-                        "Min" to min,
-                        "Avg" to avg,
-                        "Max" to max,
-                    ).forEach { (label, metric) ->
-                        Column(modifier = Modifier.weight(1f)) {
-                            Overline(label, color = Palette.textTertiary)
-                            Text(
-                                text = metric?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "—",
-                                style = NoopType.bodyNumber,
-                                color = Palette.textPrimary,
-                            )
-                        }
-                    }
-                }
+                ChartMinAvgMax(
+                    min = min?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "—",
+                    avg = "${detail.format(avg)} ${detail.unit}".trim(),
+                    max = max?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "—",
+                )
                 Text(
                     "${filteredReadings.size} readings",
                     style = NoopType.footnote,
@@ -2597,14 +2586,11 @@ private fun EffortHeartRateSection(
                     .height(Metrics.divider)
                     .background(Palette.hairline),
             )
-            Row(modifier = Modifier.fillMaxWidth()) {
-                listOf("Min" to min, "Avg" to avg, "Max" to max).forEach { (label, value) ->
-                    Column(modifier = Modifier.weight(1f)) {
-                        Overline(label, color = Palette.textTertiary)
-                        Text(uiString(R.string.l10n_today_screen_value_bpm_8f3a90c3, value), style = NoopType.bodyNumber, color = Palette.textPrimary)
-                    }
-                }
-            }
+            ChartMinAvgMax(
+                min = uiString(R.string.l10n_today_screen_value_bpm_8f3a90c3, min),
+                avg = uiString(R.string.l10n_today_screen_value_bpm_8f3a90c3, avg),
+                max = uiString(R.string.l10n_today_screen_value_bpm_8f3a90c3, max),
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,

@@ -2673,13 +2673,36 @@ private fun ChartCard(
     }
 }
 
-/** A footer strip of label/value pairs, evenly distributed. */
+/** A footer strip of label/value pairs, evenly distributed, separated by thin hairline dividers
+ *  (2026-08 redesign, same "option 1" treatment as [ChartMinAvgMax]) — this one stays generic
+ *  (arbitrary item count/order: Sleep debt's Balance/Per-night-need/Nights, Rest's Min/Avg/Max,
+ *  Duration's Avg/Min/Max/Nights) rather than moving to the fixed 3-slot shared component, so a
+ *  literal "Min"/"Max" label still borrows the same cool/warm tint as everywhere else regardless of
+ *  which position it lands in or what else shares the row. */
 @Composable
 private fun ChartFooter(items: List<Pair<String, String>>) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        items.forEach { (label, value) ->
-            Column(modifier = Modifier.weight(1f)) {
-                Overline(label, color = Palette.textTertiary)
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        items.forEachIndexed { index, (label, value) ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(Metrics.divider)
+                        .background(Palette.hairline),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f).padding(start = if (index > 0) 12.dp else 0.dp),
+                horizontalAlignment = if (label == "Avg") Alignment.CenterHorizontally else Alignment.Start,
+            ) {
+                Overline(
+                    label,
+                    color = when (label) {
+                        "Min" -> Palette.metricCyan
+                        "Max" -> Palette.metricAmber
+                        else -> Palette.textTertiary
+                    },
+                )
                 // Stage-breakdown values like "1h 23m (24%)" wrapped to a second line in a narrow column,
                 // pushing the row taller and clipping against the card edge (#406). Hold them to one line.
                 Text(
@@ -3098,17 +3121,11 @@ private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
                 }
             }
             Hairline()
-            Row(modifier = Modifier.fillMaxWidth()) {
-                listOf("Min" to minV, "Avg" to avgV, "Max" to maxV).forEach { (lbl, v) ->
-                    Column(modifier = Modifier.weight(1f)) {
-                        Overline(lbl, color = Palette.textTertiary)
-                        Text(
-                            uiString(R.string.l10n_sleep_screen_spec_format_v_spec_unit_7a7f630c, spec.format(v), spec.unit).trim(),
-                            style = NoopType.captionNumber, color = Palette.textPrimary,
-                        )
-                    }
-                }
-            }
+            ChartMinAvgMax(
+                min = uiString(R.string.l10n_sleep_screen_spec_format_v_spec_unit_7a7f630c, spec.format(minV), spec.unit).trim(),
+                avg = uiString(R.string.l10n_sleep_screen_spec_format_v_spec_unit_7a7f630c, spec.format(avgV), spec.unit).trim(),
+                max = uiString(R.string.l10n_sleep_screen_spec_format_v_spec_unit_7a7f630c, spec.format(maxV), spec.unit).trim(),
+            )
             Spacer(Modifier.height(Metrics.space8))
         }
     }

@@ -2,14 +2,18 @@ package com.noop.ui
 
 import com.noop.R
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -514,12 +518,32 @@ private fun EmptyChart() {
     }
 }
 
+/** 2026-08 redesign: thin vertical dividers between columns and the min/max labels borrowing the
+ *  same cool/warm tint as [ChartMinAvgMax] and every other chart footer (same "option 1" pass). */
 @Composable
 private fun ChartFooterRow(items: List<Pair<String, String>>) {
-    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.sectionGap)) {
-        items.forEach { (label, value) ->
-            Column {
-                Overline(label, color = Palette.textTertiary)
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        items.forEachIndexed { index, (label, value) ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(Metrics.divider)
+                        .background(Palette.hairline),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f).padding(start = if (index > 0) 12.dp else 0.dp),
+                horizontalAlignment = if (label == "Avg") Alignment.CenterHorizontally else Alignment.Start,
+            ) {
+                Overline(
+                    label,
+                    color = when (label) {
+                        "Min" -> Palette.metricCyan
+                        "Max" -> Palette.metricAmber
+                        else -> Palette.textTertiary
+                    },
+                )
                 Text(value, style = NoopType.captionNumber, color = Palette.textSecondary)
             }
         }

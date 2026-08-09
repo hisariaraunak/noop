@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -505,6 +506,48 @@ fun TrendChip(text: String, color: Color = Palette.textTertiary, modifier: Modif
         // Ellipsize rather than overflow if a caller constrains the chip's width (e.g. the workout
         // tiles' compactDelta path) — keeps the pill inside its share of the row (#332).
         Text(text, style = NoopType.captionNumber, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** The Min/Avg/Max footer row shared by every chart card in the app (2026-08 redesign, option 1 of 3
+ *  mockups — chosen for being the smallest, lowest-risk change consistent with the app's general
+ *  direction this pass of removing/tightening chrome rather than adding new containers). Three
+ *  columns like before, but now separated by thin hairline dividers instead of bare spacing, and the
+ *  MIN/MAX overlines borrow a cool/warm tint as a quick visual anchor. The VALUES themselves stay
+ *  neutral [Palette.textPrimary] — only the label is tinted — so this never implies min is "good" or
+ *  max is "bad", matching [MetricTile]'s neutral-delta rule. Single shared version so every chart
+ *  footer (Health vital detail, Effort's intraday HR, Sleep, Trends, Apple Health import charts)
+ *  renders identically instead of drifting per screen. */
+@Composable
+fun ChartMinAvgMax(min: String, avg: String, max: String, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Column(modifier = Modifier.weight(1f)) {
+            Overline("Min", color = Palette.metricCyan)
+            Text(min, style = NoopType.bodyNumber, color = Palette.textPrimary)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(Metrics.divider)
+                .background(Palette.hairline),
+        )
+        Column(
+            modifier = Modifier.weight(1f).padding(start = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Overline("Avg", color = Palette.textTertiary)
+            Text(avg, style = NoopType.bodyNumber, color = Palette.textPrimary)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(Metrics.divider)
+                .background(Palette.hairline),
+        )
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp), horizontalAlignment = Alignment.End) {
+            Overline("Max", color = Palette.metricAmber)
+            Text(max, style = NoopType.bodyNumber, color = Palette.textPrimary)
+        }
     }
 }
 

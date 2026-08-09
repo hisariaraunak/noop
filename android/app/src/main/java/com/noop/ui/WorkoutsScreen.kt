@@ -1356,13 +1356,16 @@ fun WorkoutDetailBody(vm: AppViewModel, row: WorkoutRow, modifier: Modifier = Mo
                 color = Palette.effortColor,
                 fill = true,
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                val lo = hrCurve.minOrNull()?.roundToInt() ?: 0
-                val hi = hrCurve.maxOrNull()?.roundToInt() ?: 0
-                MiniStat("Avg", row.avgHr?.let { "$it bpm" } ?: "–", Modifier.weight(1f))
-                MiniStat("Peak", (row.maxHr ?: hi).let { "$it bpm" }, Modifier.weight(1f))
-                MiniStat("Low", "$lo bpm", Modifier.weight(1f))
-            }
+            val lo = hrCurve.minOrNull()?.roundToInt() ?: 0
+            val hi = hrCurve.maxOrNull()?.roundToInt() ?: 0
+            // 2026-08 redesign: shares ChartMinAvgMax with every other chart footer in the app (option 1
+            // of 3 mockups) instead of this screen's own Avg/Peak/Low MiniStat row — same dividers + cool/
+            // warm min/max tint, and the canonical Min-Avg-Max order used everywhere else.
+            ChartMinAvgMax(
+                min = "$lo bpm",
+                avg = row.avgHr?.let { "$it bpm" } ?: "–",
+                max = (row.maxHr ?: hi).let { "$it bpm" },
+            )
             // #18: the Avg HR shown above can be EDITED on the manual sheet while the graph, zones and
             // Effort stay from the recorded session (preservingCaptured keeps the captured strain/zones).
             // When the typed average disagrees materially with this trace's own mean AND the row carries
