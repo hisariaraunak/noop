@@ -707,7 +707,10 @@ fun MetricTile(
                     label.uppercase(),
                     style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
                     color = Palette.textTertiary,
-                    maxLines = 1,
+                    // 2 lines (was 1): a label that doesn't fit narrows onto a second line instead of
+                    // ellipsizing (e.g. Sleep's "Hours vs Needed") — a tile whose label already fits in
+                    // one line is unaffected.
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

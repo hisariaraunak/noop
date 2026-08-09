@@ -487,8 +487,10 @@ fun TodayScreen(
     }
 
     // #616: ONE calorie definition across the card, the Key-Metrics tile and the detail — resolve per day,
-    // IMPORTED-FIRST (the phone's Apple/Health-Connect activeKcal, the figure these surfaces already showed),
-    // falling back to NOOP's on-device HR estimate (activeKcalEst) only for days the phone didn't cover.
+    // ON-DEVICE-FIRST (2026-08: NOOP's own HR estimate, activeKcalEst — a workout done without the phone
+    // present is under-counted by the phone's Apple/Health-Connect activeKcal instead of falling back to
+    // the on-device estimate, so the on-device figure now wins; mirrors MetricArbitrationPolicy.CALORIES),
+    // falling back to the phone's imported total only for days NOOP has no on-device estimate for.
     // Keyed by day; `caloriesByDay` feeds the SELECTED-day value the dashboard card + Key-Metrics tile both
     // read — day-scoped like every other card, and like steps.
     var caloriesByDay by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
@@ -502,13 +504,13 @@ fun TodayScreen(
                 r.activeKcal?.takeIf { it > 0 }?.let { imported.putIfAbsent(r.day, it) }
             }
             (onDevice.keys + imported.keys)
-                .mapNotNull { day -> (imported[day] ?: onDevice[day])?.let { day to it } }.toMap()
+                .mapNotNull { day -> (onDevice[day] ?: imported[day])?.let { day to it } }.toMap()
         }.getOrDefault(emptyMap())
     }
 
-    // #616: the Calories tile's 14-day sparkline — the IMPORTED-FIRST resolved series (caloriesByDay),
-    // windowed to the trailing calendar window, so a Health-Connect / Apple-only calorie user gets a trend
-    // that matches the tile's value (not the on-device estimate alone). Mirrors restCompositeSpark's build.
+    // #616: the Calories tile's 14-day sparkline — the ON-DEVICE-FIRST resolved series (caloriesByDay),
+    // windowed to the trailing calendar window, so the trend always matches the tile's own value.
+    // Mirrors restCompositeSpark's build.
     var caloriesSpark by remember { mutableStateOf<List<Double>>(emptyList()) }
     LaunchedEffect(caloriesByDay, selectedDay, keyMetricsWindowDays) {
         val cutoff = selectedDay.minusDays((keyMetricsWindowDays - 1).toLong()).toString()
@@ -677,10 +679,10 @@ fun TodayScreen(
     }
 
     // Steps for the selected day from imported Apple Health / Health Connect data, the Today Steps
-    // tile's fallback when the strap itself didn't bank an on-device count. A WHOOP 4.0 DOES count
-    // steps (in the official WHOOP app), but NOOP can't yet read them off the strap over Bluetooth, so
-    // on a 4.0 the tile shows your imported steps instead of "No Data". Reloads as the day selector
-    // moves. On-device WHOOP 5/MG steps still take precedence. (#150)
+    // tile's LAST-resort fallback (2026-08: demoted below the on-device estimate, same reasoning as
+    // calories — a phone aggregate only counts a day the phone was actually carried through, and NOOP's
+    // own calibrated motion estimate is present for every worn day regardless). On-device WHOOP 5/MG
+    // steps still take precedence over both when the strap itself banked a count. (#150)
     var importedStepsForDay by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(days, selectedDayKey) {
         // Today's steps keep moving after the manual one-shot HC import, so the stored row goes
@@ -1454,8 +1456,8 @@ fun TodayScreen(
                                     profileWeightKg = profileWeightKg,
                                     importedStepsForDay = importedStepsForDay,
                                     estimatedStepsForDay = stepsEstForDay,
-                                    caloriesForDay = caloriesByDay[selectedDayKey],   // #616: imported-first per day
-                                    caloriesSpark = caloriesSpark,                    // #616: imported-first trend
+                                    caloriesForDay = caloriesByDay[selectedDayKey],   // #616: on-device-first per day
+                                    caloriesSpark = caloriesSpark,                    // #616: on-device-first trend
                                     stepActivityClassForDay = stepActivityClassForDay,
                                     stepsEstimateCaption = stepsEstimateCaption(profileStore),
                                     restScore = restScoreForDay,
@@ -3121,7 +3123,9 @@ private fun dashboardCardFraction(
         DashboardCard.RESTING_HR -> over((day?.restingHr ?: vitalsDay?.restingHr)?.toDouble(), 100.0)
         DashboardCard.RESPIRATORY -> over(day?.respRateBpm ?: vitalsDay?.respRateBpm, 24.0)
         DashboardCard.STEPS -> {
-            val steps = (day?.steps ?: importedStepsForDay ?: estimatedStepsForDay)?.toDouble()
+            // 2026-08: on-device estimate now outranks the phone import — see dashboardCardValue's STEPS
+            // branch for why.
+            val steps = (day?.steps ?: estimatedStepsForDay ?: importedStepsForDay)?.toDouble()
             over(steps, 10000.0)
         }
         DashboardCard.SLEEP -> over(vd?.totalSleepMin, 480.0)
@@ -3184,10 +3188,14 @@ private fun dashboardCardValue(
             (vd?.skinTempDevC ?: skinTempDay?.skinTempDevC)?.let { String.format(Locale.US, "%+.1f°", it) } ?: NO_DATA
         DashboardCard.SLEEP -> sleepValue(vd)
         DashboardCard.STEPS -> {
+            // 2026-08: a real on-device pedometer count (day.steps, e.g. a band that counts directly)
+            // still wins, but the calibrated on-device ESTIMATE now outranks the phone's imported total —
+            // a workout/walk without the phone present under-counts the phone's aggregate, same reasoning
+            // as calories (see caloriesByDay above / MetricArbitrationPolicy.CALORIES).
             val real = day?.steps?.let { intStringGrouped(it.toDouble()) }
-                ?: importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
             val est = estimatedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-            real ?: est ?: NO_DATA
+            val imported = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
+            real ?: est ?: imported ?: NO_DATA
         }
         DashboardCard.CALORIES ->
             withUnit(caloriesForDay?.let { intStringGrouped(it) } ?: NO_DATA)
@@ -4216,11 +4224,12 @@ private fun MetricGrid(
     profileWeightKg: Double = 75.0,
     importedStepsForDay: Int? = null,
     estimatedStepsForDay: Int? = null,
-    // #616: the selected day's calorie value resolved imported-first (imported Apple/Health-Connect
-    // activeKcal ?: NOOP's on-device estimate), so the Calories tile matches the card + detail instead of
-    // reading the on-device estimate alone (which left it NO_DATA / inconsistent). Mirrors the steps params.
+    // #616: the selected day's calorie value resolved on-device-first (NOOP's own HR estimate ?: imported
+    // Apple/Health-Connect activeKcal), so the Calories tile matches the card + detail instead of reading
+    // the imported total alone (which under-counts a workout done without the phone present). Mirrors the
+    // steps params.
     caloriesForDay: Double? = null,
-    // #616: the Calories tile's imported-first 14-day trend (see caloriesSpark above) — threaded like
+    // #616: the Calories tile's on-device-first 14-day trend (see caloriesSpark above) — threaded like
     // restSpark because it isn't a plain DailyMetric column (it unions the imported + on-device series).
     caloriesSpark: List<Double> = emptyList(),
     // #316 / @63, the selected day's representative activity class (0=still, 1=walk, 2=run), shown as a small
@@ -4340,9 +4349,9 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // Steps precedence (unchanged): on-device count → imported → estimate. (#107/#150)
-            val realSteps = d?.steps ?: importedStepsForDay
-            val steps = realSteps ?: estimatedStepsForDay
+            // Steps precedence (2026-08): on-device count → on-device estimate → imported. (#107/#150)
+            val realSteps = d?.steps ?: estimatedStepsForDay
+            val steps = realSteps ?: importedStepsForDay
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_steps_cdde4f20),
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
@@ -4363,8 +4372,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.CALORIES to run {
-            // #616: the per-day resolved calorie value (caloriesForDay = imported Apple/Health-Connect
-            // first, else NOOP's on-device estimate) — one number across tile, card and detail.
+            // #616: the per-day resolved calorie value (caloriesForDay = NOOP's on-device estimate
+            // first, else imported Apple/Health-Connect) — one number across tile, card and detail.
             val kcal = caloriesForDay
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_calories_3e62ecfe),
@@ -4372,7 +4381,7 @@ private fun MetricGrid(
                 unit = if (kcal != null) "kcal" else "",
                 tint = Palette.metricAmber,
                 frac = kcal?.let { (it / 800.0).coerceIn(0.0, 1.0) },
-                spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
+                spark = caloriesSpark,   // #616: on-device-first trend (was missing → no trend line)
             )
         },
     ).mapValues { (metric, tile) ->
@@ -5544,8 +5553,8 @@ private data class Window(
     val resp: List<Double>,
     // #616: the Steps tile carried no `spark` series, so it drew no trend line while every other tile did.
     // On-device DailyMetric.steps (the strap @57 count) — the same signal the Steps tile VALUE reads
-    // (on-device-first), matching iOS kSparks "steps". (Calories is imported-first, so its spark is threaded
-    // separately as caloriesSpark, not read off a DailyMetric column here.)
+    // (on-device-first), matching iOS kSparks "steps". (Calories is ALSO on-device-first now, so its spark
+    // is threaded separately as caloriesSpark, not read off a DailyMetric column here.)
     val steps: List<Double>,
 )
 
@@ -5559,9 +5568,9 @@ private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
     windowDays: Int,
-    // 2026-08 audit (#616 follow-up): real -> imported -> estimate per day, the same precedence the
-    // Steps tile's own displayed VALUE already uses, so the tile's delta/"N-day avg" caption has a
-    // real trailing window to compare against instead of only the strap's on-device count.
+    // 2026-08 audit (#616 follow-up; precedence flipped 2026-08): real -> estimate -> imported per day,
+    // the same precedence the Steps tile's own displayed VALUE now uses, so the tile's delta/"N-day avg"
+    // caption has a real trailing window to compare against instead of only the strap's on-device count.
     importedStepsByDay: Map<String, Int> = emptyMap(),
     estimatedStepsByDay: Map<String, Int> = emptyMap(),
 ): Window =
@@ -5581,7 +5590,7 @@ private fun rememberTrendWindow(
             spo2 = series { it.spo2Pct },
             resp = series { it.respRateBpm },
             steps = recent.mapNotNull { d ->
-                (d.steps ?: importedStepsByDay[d.day] ?: estimatedStepsByDay[d.day])?.toDouble()
+                (d.steps ?: estimatedStepsByDay[d.day] ?: importedStepsByDay[d.day])?.toDouble()
             },
         )
     }

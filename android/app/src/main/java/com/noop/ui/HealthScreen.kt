@@ -1716,9 +1716,10 @@ fun VitalDetailScreen(
     else remember(days, key, tempUnit, effortScale) { buildVitalDetail(days, key, tempUnit, effortScale) }
     var range by remember { mutableStateOf(VitalDetailRange.MONTH) }
 
-    // The subtitle tracks how much history the metric has, so we never promise a "historical trend" the
-    // view isn't showing: Fitness Age with no reading yet -> what it still needs; ANY metric with a single
-    // reading -> that reading (trend to follow); two+ -> the trend. Pre-load falls through to trend.
+    // The subtitle only appears for the two states worth explaining — Fitness Age with no reading yet
+    // (what it still needs) and a single reading (trend to follow) — since a chart with two or more
+    // points is self-evidently a trend and doesn't need a caption saying so. Pre-load falls through to
+    // no subtitle, same as the two-plus-points case.
     val loadedPoints = if (seriesLoaded) (detail?.points?.size ?: 0) else -1
     // #430 parity: the detail carries the SAME backdrop as the screen that pushed it — the day-cycle sky
     // when the setting is on (full-viewport when "Sky behind cards" is also on, so the transparent cards
@@ -1736,7 +1737,10 @@ fun VitalDetailScreen(
         subtitle = when {
             key == "fitness_age" && loadedPoints == 0 -> "What your Fitness Age still needs."
             loadedPoints == 1 -> "Your latest reading — trend to follow."
-            else -> "Historical trend from cached daily metrics."
+            // 2026-08: the generic "Historical trend from cached daily metrics." line was removed —
+            // every vital_detail page already shows the actual chart directly below the title, so the
+            // subtitle was just describing what the user was about to see one line down.
+            else -> null
         },
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards needs the full-viewport container too — the band container's status-bar

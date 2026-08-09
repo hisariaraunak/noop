@@ -335,10 +335,11 @@ fun SleepScreen(
         }
     }
 
-    // Secondary Insights / Historical Trends disclosures (IA cleanup, 2026-08): collapsed by default so
-    // the primary scroll stays to Tonight + the headline Metrics grid; NOT persisted, same as every other
-    // "starts collapsed" state in this app (Key Metrics overflow, Data Sources detail before it retired).
-    var secondaryExpanded by remember { mutableStateOf(false) }
+    // Historical Trends disclosure (IA cleanup, 2026-08): collapsed by default so the primary scroll
+    // stays to Tonight + the Night Metrics grid; NOT persisted, same as every other "starts collapsed"
+    // state in this app (Key Metrics overflow, Data Sources detail before it retired). Secondary Insights
+    // (Restorative/Respiratory) no longer has its own disclosure — those two tiles moved into Night
+    // Metrics directly (2026-08).
     var historyExpanded by remember { mutableStateOf(false) }
 
     // Tapping a metric tile opens a full-history detail sheet for that one metric. (PR #260)
@@ -403,7 +404,6 @@ fun SleepScreen(
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_sleep_screen_sleep_3cac34e6),
-        subtitle = "Last night, read in two seconds.",
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the static time-of-day liquid sky
         // settles into the theme canvas behind the header + hero, bled full-width up behind the status bar
         // via the scaffold's topBackground plumbing. Gated on the day-cycle preference exactly like Today
@@ -508,7 +508,6 @@ fun SleepScreen(
                             else tilesModel?.performance?.latest,
                     asleepMin = model?.stages?.asleep,
                     source = restHeroSource(imported, night?.dayKey ?: days.lastOrNull()?.day, activeIsOura),
-                    overline = nightRelativeLabel(nightOffset),
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -623,22 +622,6 @@ fun SleepScreen(
                 val m = tilesModel
                 item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
                 item { SleepMetricsGrid(m, onMetricClick = { detailMetricKey = it }) }
-
-                // SECONDARY INSIGHTS (2026-08 IA cleanup) — Restorative + Respiratory, folded behind a
-                // disclosure so the primary scroll stays to the four headline metrics above.
-                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                item {
-                    ExpandableSectionHeader(
-                        title = "Secondary Insights",
-                        overline = "Deeper look",
-                        expanded = secondaryExpanded,
-                        onToggle = { secondaryExpanded = !secondaryExpanded },
-                    )
-                }
-                if (secondaryExpanded) {
-                    item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-                    item { SleepSecondaryInsights(m, onMetricClick = { detailMetricKey = it }) }
-                }
 
                 // HISTORICAL TRENDS (2026-08 IA cleanup) — everything multi-night: Rest trend, the hours-
                 // asleep trend, the sleep-debt ledger, hours-vs-needed, and bedtime/wake consistency. Also
@@ -821,9 +804,8 @@ private val LIQUID_HERO_RADIUS: Dp = 26.dp
 // figures, fraction math and Rest tint are UNCHANGED from the BevelGauge this replaced — presentation-only.
 
 @Composable
-private fun RestHero(score: Double?, asleepMin: Double?, source: String, overline: String) {
+private fun RestHero(score: Double?, asleepMin: Double?, source: String) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Sleep performance", overline = overline, trailing = "Rest")
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -975,9 +957,10 @@ private fun Hero(
                 ?: session?.let { (it.endTs - it.effectiveStartTs) / 60.0 }
                 ?: s.total
             // An Oura night's stages are the ring's RAW on-device SleepNet classification (decoded off the
-            // 0x49 phase stream), NOT a NOOP approximation — so it gets its own honest caption instead of the
-            // "approx. stages (on-device)" one that describes NOOP's own sparse-motion staging.
-            val stageCaption = if (activeIsOura) " · raw on-device stages" else " · approx. stages (on-device)"
+            // 0x49 phase stream), NOT a NOOP approximation, so it still gets its own honest caption. The
+            // non-Oura "approx. stages (on-device)" caption was removed (2026-08) — the subtitle's own
+            // efficiency/in-bed figures are enough without also flagging every other source as approximate.
+            val stageCaption = if (activeIsOura) " · raw on-device stages" else ""
             val subtitle = "${durationText(inBedMin)} in bed · ${display.efficiencyText} efficiency" +
                 (if (display.realSegments != null) stageCaption else "")
             // iOS #988 port: true per-epoch segments (≥ 2 — a single run has no transitions to lay
@@ -2160,13 +2143,17 @@ private fun NightNavHeader(
 
 // MARK: - 2. Metric grid — the shared MetricTile (Components.kt), 2026-08 restyle
 
-/** Rest/Efficiency/Consistency/Hours-vs-Needed as the shared [MetricTile] grid — the same tile design
- *  Today's Key Metrics and Health's Recovery Vitals use, replacing the old sparkline-based SparkTile
- *  grid for visual consistency across the app. Sleep Debt is deliberately NOT a tile here anymore: it's
- *  the same number the Sleep-debt ledger already shows (as a more useful running balance), so a third
- *  surface for it here was pure duplication. Restorative/Respiratory moved to Secondary Insights. */
+/** Rest/Efficiency/Consistency/Hours-vs-Needed/Restorative/Respiratory as the shared [MetricTile] grid
+ *  — the same tile design Today's Key Metrics and Health's Recovery Vitals use, replacing the old
+ *  sparkline-based SparkTile grid for visual consistency across the app. Sleep Debt is deliberately NOT
+ *  a tile here anymore: it's the same number the Sleep-debt ledger already shows (as a more useful
+ *  running balance), so a third surface for it here was pure duplication. Restorative/Respiratory
+ *  (2026-08: merged back in from the now-removed "Secondary Insights" disclosure — the extra tap wasn't
+ *  worth it for two tiles) are built as plain [TileReading]s rather than via [pctReading] since
+ *  Respiratory isn't a percentage. */
 @Composable
 private fun SleepMetricsGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
+    val respValue = m.respiratory.latest
     val tiles = listOf(
         MetricTileStyle(Icons.Filled.Bedtime, Palette.restColor) to
             pctReading("Rest", m.performance, onMetricClick = { onMetricClick("performance") }),
@@ -2176,9 +2163,22 @@ private fun SleepMetricsGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}
             pctReading("Consistency", m.consistency, onMetricClick = { onMetricClick("consistency") }),
         MetricTileStyle(Icons.Filled.HourglassBottom, Palette.restColor) to
             pctReading("Hours vs Needed", m.hoursVsNeeded, onMetricClick = { onMetricClick("hours_vs_needed") }),
+        MetricTileStyle(Icons.Filled.AutoAwesome, Palette.sleepREM) to
+            pctReading("Restorative", m.restorative, onMetricClick = { onMetricClick("restorative") }),
+        MetricTileStyle(Icons.Filled.Air, Palette.metricPurple) to
+            TileReading(
+                label = "Respiratory",
+                value = respValue?.let { String.format(Locale.US, "%.1f", it) },
+                unit = "rpm",
+                caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
+                // No delta arrow: the arrow badge is "%"-suffixed, which would misstate an rpm delta.
+                deltaPct = null,
+                fillFraction = ((respValue ?: 0.0) / 24.0).coerceIn(0.0, 1.0),
+                onClick = { onMetricClick("respiratory") },
+            ),
     )
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Night detail", overline = "Metrics", trailing = "vs typical")
+        SectionHeader("Night Metrics")
         tiles.chunked(2).forEach { row ->
             Row(
                 modifier = Modifier.height(IntrinsicSize.Max),
@@ -2199,42 +2199,6 @@ private fun SleepMetricsGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}
                 }
             }
         }
-    }
-}
-
-/** Restorative + Respiratory, folded behind Secondary Insights (2026-08) — same [MetricTile] design,
- *  moved out of the primary grid since they're a deeper look than the headline four. */
-@Composable
-private fun SleepSecondaryInsights(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
-    Row(
-        modifier = Modifier.height(IntrinsicSize.Max),
-        horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
-    ) {
-        val restorative = pctReading("Restorative", m.restorative, onMetricClick = { onMetricClick("restorative") })
-        MetricTile(
-            label = restorative.label,
-            style = MetricTileStyle(Icons.Filled.AutoAwesome, Palette.sleepREM),
-            value = restorative.value,
-            unit = restorative.unit,
-            caption = restorative.caption,
-            deltaPct = restorative.deltaPct,
-            fillFraction = restorative.fillFraction,
-            onClick = restorative.onClick,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
-        val respValue = m.respiratory.latest
-        MetricTile(
-            label = "Respiratory",
-            style = MetricTileStyle(Icons.Filled.Air, Palette.metricPurple),
-            value = respValue?.let { String.format(Locale.US, "%.1f", it) },
-            unit = "rpm",
-            caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
-            // No delta arrow: the arrow badge is "%"-suffixed, which would misstate an rpm delta.
-            deltaPct = null,
-            fillFraction = ((respValue ?: 0.0) / 24.0).coerceIn(0.0, 1.0),
-            onClick = { onMetricClick("respiratory") },
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
     }
 }
 
@@ -2383,7 +2347,14 @@ private fun DebtDeltaBars(ledger: SleepDebtLedger) {
 private fun StagesVsTypical(m: SleepModel) {
     val s = m.stages
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Stages vs typical", overline = "Selected night", trailing = "marker = your mean")
+        // 2026-08: dropped the "Selected night" overline and the "marker = your mean" trailing legend —
+        // title steps down from a competing headline (title2) to a quiet label (headline), and the
+        // "typical = your all-time average" caption underneath explains the concept in one line instead,
+        // which also lets each StageRow below drop its own repeated "vs typ" suffix.
+        Column {
+            Text("Stages vs typical", style = NoopType.headline, color = Palette.textPrimary)
+            Text("typical = your all-time average", style = NoopType.footnote, color = Palette.textTertiary)
+        }
         NoopCard(tint = Palette.restColor) {
             Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
                 StageRow("Deep", last = s.deep, typical = m.typicalDeepMin, color = Palette.sleepDeep)
@@ -2412,7 +2383,7 @@ private fun StageRow(label: String, last: Double, typical: Double?, color: Color
         } else {
             val diff = last - typical
             val sign = if (diff >= 0) "+" else "−"
-            "$sign${durationText(abs(diff))} vs typ"
+            "$sign${durationText(abs(diff))}"
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
