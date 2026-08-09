@@ -840,6 +840,25 @@ object IntelligenceEngine {
             .appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, "0000-01-01", "9999-12-31")
             .map { it.day }.toHashSet()
 
+        // 2026-08 fix (skin-temp flap): the skin-temp baseline (skinBase2 above) is refolded from
+        // scratch EVERY run over only the nights THIS run could read a raw mean for — a run that fires
+        // before a night's raw skin-temp samples finish BLE-offloading sees fewer valid nights than a
+        // later run, can drop below the fold's `usable` threshold, and — with no fallback —
+        // [recomputeSkinTempDev] would then write null for EVERY scored night, blanking values an
+        // earlier, more-complete run already computed and persisted correctly. The Skin Temp card then
+        // flickers to "No Data" until the next run re-syncs enough nights to make the baseline usable
+        // again. Reading the already-persisted values once here and falling back to them below (never
+        // overwriting a good value with null just because this pass's baseline is momentarily thin)
+        // makes the write monotonic — the same "never blank a field a prior pass got right" coalesce
+        // WhoopRepository.mergeDaily already applies across sources, just within this recompute instead.
+        // A genuinely new account with no prior skin-temp reading is unaffected: the lookup simply misses.
+        val existingSkinTempByDay: Map<String, Double?> = if (scoredNights.isEmpty()) {
+            emptyMap()
+        } else {
+            val dayKeys = scoredNights.map { it.daily.day }
+            repo.dailyMetrics(computedId, dayKeys.min(), dayKeys.max()).associate { it.day to it.skinTempDevC }
+        }
+
         for (res in scoredNights) {
             // #299: scope the edits to THIS day before folding. A userEdited row / hand-logged nap belongs
             // to exactly ONE day — the day its night ENDS on, matching the daily's end-day bucket
@@ -867,6 +886,7 @@ object IntelligenceEngine {
                 for (line in recoveryTraceLines(daily, baselines2)) recoveryTraceSink(line)
             }
             val skinTempDevC = recomputeSkinTempDev(res.nightlySkinTempC, baselines2.skinTemp)
+                ?: existingSkinTempByDay[daily.day]
             RestScorer.restFromDaily(daily)?.let { rest ->
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "sleep_performance", value = rest))
             }
