@@ -3092,6 +3092,19 @@ private fun dashboardCardTint(card: DashboardCard): Color = when (card) {
 }
 
 /**
+ * Steps only accumulate through the day, so of the three candidate readings (the strap/import's
+ * own `day.steps`, the on-device motion-calibrated estimate, and the phone's imported aggregate)
+ * the HIGHEST one is always the most complete — never wrong to prefer more steps counted, and it
+ * self-heals whichever source last happened to refresh instead of hard-coding one as permanently
+ * authoritative. This replaces a strict `real ?: estimate ?: imported` fallback (2026-08): `day.steps`
+ * for a Health-Connect-fed "my-whoop" row is itself just a snapshot from HC's BATCH import, frozen at
+ * import time with no live top-up (unlike the separate AppleDaily("health-connect") row
+ * [HealthConnectImporter.refreshTodaySteps] keeps fresh) — trusting it unconditionally showed a
+ * frozen morning count all day even as the live HC total and the estimate both kept climbing.
+ */
+private fun bestStepsCount(vararg candidates: Int?): Int? = candidates.filterNotNull().maxOrNull()
+
+/**
  * A dashboard card's mini-vessel fill fraction (0..1), or null for an empty (no-reading) vessel. Mirrors the
  * iOS `liquidCard` `frac:` argument exactly, per card:
  *   Stress = stress/3 · Fitness age = 0.5 (fixed) · Vitality = vitality/100 · HRV = avgHrv/120 ·
@@ -3123,9 +3136,8 @@ private fun dashboardCardFraction(
         DashboardCard.RESTING_HR -> over((day?.restingHr ?: vitalsDay?.restingHr)?.toDouble(), 100.0)
         DashboardCard.RESPIRATORY -> over(day?.respRateBpm ?: vitalsDay?.respRateBpm, 24.0)
         DashboardCard.STEPS -> {
-            // 2026-08: on-device estimate now outranks the phone import — see dashboardCardValue's STEPS
-            // branch for why.
-            val steps = (day?.steps ?: estimatedStepsForDay ?: importedStepsForDay)?.toDouble()
+            // See bestStepsCount: highest of the three candidates, not a fixed precedence order.
+            val steps = bestStepsCount(day?.steps, estimatedStepsForDay, importedStepsForDay)?.toDouble()
             over(steps, 10000.0)
         }
         DashboardCard.SLEEP -> over(vd?.totalSleepMin, 480.0)
@@ -3187,16 +3199,10 @@ private fun dashboardCardValue(
             // Same per-field carry as Blood Oxygen.
             (vd?.skinTempDevC ?: skinTempDay?.skinTempDevC)?.let { String.format(Locale.US, "%+.1f°", it) } ?: NO_DATA
         DashboardCard.SLEEP -> sleepValue(vd)
-        DashboardCard.STEPS -> {
-            // 2026-08: a real on-device pedometer count (day.steps, e.g. a band that counts directly)
-            // still wins, but the calibrated on-device ESTIMATE now outranks the phone's imported total —
-            // a workout/walk without the phone present under-counts the phone's aggregate, same reasoning
-            // as calories (see caloriesByDay above / MetricArbitrationPolicy.CALORIES).
-            val real = day?.steps?.let { intStringGrouped(it.toDouble()) }
-            val est = estimatedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-            val imported = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-            real ?: est ?: imported ?: NO_DATA
-        }
+        DashboardCard.STEPS ->
+            // See bestStepsCount: highest of the three candidates, not a fixed precedence order.
+            bestStepsCount(day?.steps, estimatedStepsForDay, importedStepsForDay)
+                ?.let { intStringGrouped(it.toDouble()) } ?: NO_DATA
         DashboardCard.CALORIES ->
             withUnit(caloriesForDay?.let { intStringGrouped(it) } ?: NO_DATA)
         DashboardCard.STRESS ->
@@ -4349,9 +4355,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // Steps precedence (2026-08): on-device count → on-device estimate → imported. (#107/#150)
-            val realSteps = d?.steps ?: estimatedStepsForDay
-            val steps = realSteps ?: importedStepsForDay
+            // See bestStepsCount: highest of the three candidates, not a fixed precedence order. (#107/#150)
+            val steps = bestStepsCount(d?.steps, estimatedStepsForDay, importedStepsForDay)
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_steps_cdde4f20),
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
@@ -5568,9 +5573,10 @@ private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
     windowDays: Int,
-    // 2026-08 audit (#616 follow-up; precedence flipped 2026-08): real -> estimate -> imported per day,
-    // the same precedence the Steps tile's own displayed VALUE now uses, so the tile's delta/"N-day avg"
-    // caption has a real trailing window to compare against instead of only the strap's on-device count.
+    // 2026-08 audit (#616 follow-up): per-day steps use bestStepsCount (highest of real/estimate/
+    // imported), the same rule the Steps tile's own displayed VALUE now uses, so the tile's delta/
+    // "N-day avg" caption has a real trailing window to compare against instead of only the strap's
+    // on-device count.
     importedStepsByDay: Map<String, Int> = emptyMap(),
     estimatedStepsByDay: Map<String, Int> = emptyMap(),
 ): Window =
@@ -5590,7 +5596,7 @@ private fun rememberTrendWindow(
             spo2 = series { it.spo2Pct },
             resp = series { it.respRateBpm },
             steps = recent.mapNotNull { d ->
-                (d.steps ?: estimatedStepsByDay[d.day] ?: importedStepsByDay[d.day])?.toDouble()
+                bestStepsCount(d.steps, estimatedStepsByDay[d.day], importedStepsByDay[d.day])?.toDouble()
             },
         )
     }
