@@ -275,6 +275,20 @@
                 android:resource="@xml/noop_compact_widget_info" />
         </receiver>
 
+        <!-- Live Heart Rate + Steps home-screen widget, a third separate picker entry alongside the
+             other two — the two numbers that change through the day, without the end-of-day scores. -->
+        <receiver
+            android:name="com.noop.widget.NoopHrStepsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_hr_steps_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/noop_hr_steps_widget_info" />
+        </receiver>
+
         <!-- Optional native phone-call alerts. The receiver only reacts to ringing/offhook/idle state
              and never reads the incoming-number extra. Delivery is gated by the Notifications screen
              settings and by the just-in-time READ_PHONE_STATE runtime permission. -->

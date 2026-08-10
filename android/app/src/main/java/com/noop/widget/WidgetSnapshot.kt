@@ -17,6 +17,9 @@ data class WidgetSnapshot(
     val effortPct: Int? = null,
     /** Live heart rate, null when not streaming. */
     val heartRate: Int? = null,
+    /** Today's steps — the same real/estimate precedence Today's Key Metrics tile uses
+     *  ([com.noop.ui.bestStepsCount]), null until any source has a reading for the day. */
+    val steps: Int? = null,
     /** Strap battery 0–100, null until the strap reports it. */
     val batteryPct: Int? = null,
     val connected: Boolean = false,
@@ -54,9 +57,13 @@ object WidgetSnapshotStore {
         val compactIds = runCatching {
             GlanceAppWidgetManager(app).getGlanceIds(NoopCompactGlanceWidget::class.java)
         }.getOrDefault(emptyList())
-        if (standardIds.isEmpty() && compactIds.isEmpty()) return
+        val hrStepsIds = runCatching {
+            GlanceAppWidgetManager(app).getGlanceIds(NoopHrStepsGlanceWidget::class.java)
+        }.getOrDefault(emptyList())
+        if (standardIds.isEmpty() && compactIds.isEmpty() && hrStepsIds.isEmpty()) return
         runCatching { NoopGlanceWidget().updateAll(app) }
         runCatching { NoopCompactGlanceWidget().updateAll(app) }
+        runCatching { NoopHrStepsGlanceWidget().updateAll(app) }
     }
 
     fun save(context: Context, snap: WidgetSnapshot) {
@@ -65,6 +72,7 @@ object WidgetSnapshotStore {
             .putInt("rest", snap.restPct ?: -1)
             .putInt("effort", snap.effortPct ?: -1)
             .putInt("hr", snap.heartRate ?: -1)
+            .putInt("steps", snap.steps ?: -1)
             .putInt("battery", snap.batteryPct ?: -1)
             .putBoolean("connected", snap.connected)
             .putLong("updatedAt", snap.updatedAtMs)
@@ -78,6 +86,7 @@ object WidgetSnapshotStore {
             restPct = p.getInt("rest", -1).takeIf { it >= 0 },
             effortPct = p.getInt("effort", -1).takeIf { it >= 0 },
             heartRate = p.getInt("hr", -1).takeIf { it > 0 },
+            steps = p.getInt("steps", -1).takeIf { it >= 0 },
             batteryPct = p.getInt("battery", -1).takeIf { it >= 0 },
             connected = p.getBoolean("connected", false),
             updatedAtMs = p.getLong("updatedAt", 0L),

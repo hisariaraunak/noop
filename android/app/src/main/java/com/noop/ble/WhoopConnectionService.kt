@@ -342,6 +342,19 @@ class WhoopConnectionService : Service() {
                 // while the app UI is closed. Throttled + no-op without a placed widget (the store
                 // checks both); runCatching so a Glance hiccup never tears down the connection.
                 runCatching {
+                    // Steps for the HR+Steps widget: same real/estimate precedence as Today's Key
+                    // Metrics tile (com.noop.ui.bestStepsCount) — anchorRow.steps is the merged
+                    // real/imported bucket, estimatedSteps is the on-device motion estimate for the
+                    // SAME day the rest of this snapshot anchors on. No live Health Connect top-up
+                    // here (that's a UI-triggered refresh, not something a background push should
+                    // fire on its own cadence) — the on-device estimate alone already stays live
+                    // throughout the day since the steps_est fix.
+                    val estimatedSteps = anchorRow?.day?.let { day ->
+                        runCatching {
+                            repo.resolvedSeries("steps_est", "my-whoop", day, day)
+                                .values.firstOrNull()?.second?.let { Math.round(it).toInt() }
+                        }.getOrNull()
+                    }
                     WidgetSnapshotStore.push(
                         this@WhoopConnectionService,
                         WidgetSnapshot(
@@ -352,6 +365,7 @@ class WhoopConnectionService : Service() {
                             restPct = anchorRow?.let { RestScorer.restFromDaily(it)?.roundToInt() },
                             effortPct = anchorRow?.strain?.roundToInt(),
                             heartRate = state.heartRate,
+                            steps = com.noop.ui.bestStepsCount(anchorRow?.steps, estimatedSteps),
                             batteryPct = state.batteryPct?.roundToInt(),
                             connected = state.connected,
                             updatedAtMs = System.currentTimeMillis(),

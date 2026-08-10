@@ -3102,7 +3102,7 @@ private fun dashboardCardTint(card: DashboardCard): Color = when (card) {
  * [HealthConnectImporter.refreshTodaySteps] keeps fresh) — trusting it unconditionally showed a
  * frozen morning count all day even as the live HC total and the estimate both kept climbing.
  */
-private fun bestStepsCount(vararg candidates: Int?): Int? = candidates.filterNotNull().maxOrNull()
+internal fun bestStepsCount(vararg candidates: Int?): Int? = candidates.filterNotNull().maxOrNull()
 
 /**
  * A dashboard card's mini-vessel fill fraction (0..1), or null for an empty (no-reading) vessel. Mirrors the

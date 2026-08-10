@@ -824,6 +824,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // widget reads the anchor here (the notification's honest-null contract lives in the
                     // service), keeping the two symmetric.
                     val anchorRow = widgetAnchorRow(days, logicalKey, localKey)
+                    // Steps for the HR+Steps widget: same real/estimate precedence as Today's Key
+                    // Metrics tile (bestStepsCount) — mirrors the WhoopConnectionService producer so
+                    // the two can never drift, same as anchorRow above.
+                    val estimatedSteps = anchorRow?.day?.let { day ->
+                        runCatching {
+                            repo.resolvedSeries("steps_est", "my-whoop", day, day, strapDeviceId = activeStrapId)
+                                .values.firstOrNull()?.second?.let { Math.round(it).toInt() }
+                        }.getOrNull()
+                    }
                     WidgetSnapshotStore.push(
                         appContext,
                         WidgetSnapshot(
@@ -833,6 +842,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             restPct = anchorRow?.let { RestScorer.restFromDaily(it)?.roundToInt() },
                             effortPct = anchorRow?.strain?.roundToInt(),
                             heartRate = live.heartRate,
+                            steps = bestStepsCount(anchorRow?.steps, estimatedSteps),
                             batteryPct = live.batteryPct?.roundToInt(),
                             connected = live.connected,
                             updatedAtMs = System.currentTimeMillis(),

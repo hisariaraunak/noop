@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live Heart Rate + Steps home-screen widget metadata. updatePeriodMillis=0: the app pushes
+     updates through WidgetSnapshotStore whenever live state changes, same as the other two
+     widgets — no OS polling. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_hr_steps_description"
+    android:minWidth="140dp"
+    android:minHeight="88dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout" />
