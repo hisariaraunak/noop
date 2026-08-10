@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Alarm
@@ -36,6 +35,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Edit
@@ -140,7 +140,7 @@ private enum class Destination(
     // Group: Activity
     Workouts("workouts", R.string.nav_workouts, Icons.Filled.FitnessCenter),
     WorkoutDetail("workout_detail/{deviceId}/{startTs}", R.string.nav_workouts, Icons.Filled.FitnessCenter),
-    Trends("trends", R.string.nav_trends, Icons.AutoMirrored.Filled.TrendingUp),
+    Trends("trends", R.string.nav_trends, Icons.Filled.CalendarMonth),
 
     // Group: Insight
     Coach("coach", R.string.nav_coach, Icons.Filled.AutoAwesome),
@@ -423,7 +423,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onBreathe = { nav.navigateTopLevel(Destination.Breathe.route) },
                     )
                 }
-                composable(Destination.Trends.route) { TrendsScreen(viewModel) }
+                composable(Destination.Trends.route) { WeekInReviewScreen(viewModel) }
                 composable(Destination.Insights.route) {
                     InsightsScreen(
                         onOpenJournal = { nav.navigate(Destination.Journal.route) },
@@ -773,8 +773,9 @@ private data class BarTab(val dest: Destination, val icon: ImageVector, @StringR
  *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
 private val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
-    // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
-    BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
+    // Week in Review (2026-08) replaced the Trends line-chart tab — a calendar glyph fits its
+    // week-nav + digest content better than the old rising-trend icon.
+    BarTab(Destination.Trends, Icons.Filled.CalendarMonth, R.string.nav_trends),
 )
 private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
