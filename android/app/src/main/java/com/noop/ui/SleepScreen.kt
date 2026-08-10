@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
@@ -572,28 +571,6 @@ fun SleepScreen(
                         }.getOrDefault(dismissedSleeps)
                     }
                 },
-                onAddNap = { startTs, endTs ->
-                    // Persist the new nap as its OWN session (#508); reload `sleeps` afterwards so the
-                    // new block shows in the ◀/▶ browse without waiting for a sync. We don't optimistically
-                    // insert here because the stages are staged from raw off the UI thread.
-                    scope.launch {
-                        vm.addManualNap(startTs, endTs)
-                        sleeps = runCatching {
-                            val now = System.currentTimeMillis() / 1000L
-                            // Same active∪canonical union as the main loader (#814/#1008), so the
-                            // post-nap reload can't snap the browse back to a canonical-only night set.
-                            val importedSessions = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
-                            val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-                            fun localEndDay(ts: Long): String {
-                                val offsetSec = (java.util.TimeZone.getDefault().getOffset(ts * 1000) / 1000).toLong()
-                                return AnalyticsEngine.dayString(ts, offsetSec)
-                            }
-                            // Same imported-wins + #241 richness merge as the main loader.
-                            WhoopRepository.mergeSleepRichness(importedSessions, computed) { localEndDay(it.endTs) }
-                                .sortedBy { it.effectiveStartTs }
-                        }.getOrDefault(sleeps)
-                    }
-                },
                 onPickNightDate = onPickNightDate,
                 napBlocks = night?.napBlocks ?: emptyList(),
                 habitualMidsleepSec = habitualMidsleep,
@@ -901,7 +878,6 @@ private fun Hero(
     session: SleepSession? = null,
     onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
     onDeleteSession: (SleepSession) -> Unit = {},
-    onAddNap: (Long, Long) -> Unit = { _, _ -> },
     onPickNightDate: ((LocalDate) -> Unit)? = null,
     napBlocks: List<SleepSession> = emptyList(),
     // The LEARNED habitual midsleep the engine threaded into the daily total, passed to the main-night
@@ -923,15 +899,24 @@ private fun Hero(
     windowWakeTs: Long? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onDeleteSession, onAddNap, onPickNightDate)
-        // The night's clock window — when you fell asleep and when you woke — as its own clearly
-        // labelled row. These were only ever in the nav-header's trailing caption, which truncates
-        // between the two chevrons on a phone, so in practice the two times people look for first
-        // were effectively hidden. Shown for every night that has a session (including the stage-less
-        // stub, where it's the only thing the hero can say). Mirrors iOS SleepView.sleepWindowRow.
+        // Selector + Asleep/Woke merged into ONE card (2026-08), split by a single hairline, instead
+        // of a bordered selector pill floating above a separately-tinted card. The night's clock
+        // window — when you fell asleep and when you woke — stays its own clearly labelled row (these
+        // were only ever in the nav-header's trailing caption, which truncates between the two
+        // chevrons on a phone, so in practice the two times people look for first were effectively
+        // hidden). Shown for every night that has a session (including the stage-less stub, where it's
+        // the only thing the hero can say). Mirrors iOS SleepView.sleepWindowRow.
         // #345: the row shows the WHOLE night's window — on a split night the session (edit anchor)
         // ends mid-night and its endTs contradicted the header pill two lines above.
-        session?.let { SleepWindowRow(windowOnsetTs ?: it.effectiveStartTs, windowWakeTs ?: it.endTs) }
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onPickNightDate)
+                if (session != null) {
+                    Box(Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
+                    SleepWindowRow(windowOnsetTs ?: session.effectiveStartTs, windowWakeTs ?: session.endTs)
+                }
+            }
+        }
         if (display == null) {
             // Honest fallback: this night recorded no usable stage data — never silently
             // substitute another night's hypnogram. (#160)
@@ -1601,37 +1586,34 @@ private fun MotionStrip(epochs: List<Double>) {
  * always visible, not truncated in the header caption. On-brand (surfaceRaised block, tokens) and
  * combined into one TalkBack element. Mirrors iOS SleepView.sleepWindowRow (PR #289).
  */
+/**
+ * The Asleep/Woke pair, laid out edge-to-edge (2026-08): Asleep flush left, Woke flush right, no
+ * divider — [Arrangement.SpaceBetween] on a [Modifier.fillMaxWidth] Row (the old trailing weighted
+ * Spacer only consumed leftover width, it never pushed Woke anywhere). No longer its own card — the
+ * caller ([Hero]) merges this into the SAME card as [NightNavHeader]'s selector, split by one
+ * hairline. Each icon keeps its own colour (moon/blue, sun/amber) instead of a single shared tint,
+ * so the two sides read as distinct at a glance.
+ */
 @Composable
 private fun SleepWindowRow(onsetTs: Long, wakeTs: Long) {
     val asleep = clockTimeLabel(onsetTs)
     val woke = clockTimeLabel(wakeTs)
-    // A frosted Rest-tinted card (was a flat surfaceRaised block) so the window row sits in the
-    // same colour world as the rest of the screen. Bevel treatment — content unchanged.
-    NoopCard(
-        modifier = Modifier.semantics(mergeDescendants = true) {
-            contentDescription = uiString(R.string.l10n_sleep_screen_fell_asleep_at_asleep_woke_at_80465b2d, asleep, woke)
-        },
-        padding = Metrics.space14,
-        tint = Palette.restColor,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                contentDescription = uiString(R.string.l10n_sleep_screen_fell_asleep_at_asleep_woke_at_80465b2d, asleep, woke)
+            },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SleepTime(icon = Icons.Filled.Bedtime, label = uiString(R.string.l10n_sleep_screen_asleep_b9692bbe), value = asleep)
-            Spacer(Modifier.width(Metrics.space12))
-            Box(
-                modifier = Modifier
-                    .height(30.dp)
-                    .width(Metrics.divider)
-                    .background(Palette.hairline),
-            )
-            Spacer(Modifier.width(Metrics.space12))
-            SleepTime(icon = Icons.Filled.WbSunny, label = uiString(R.string.l10n_sleep_screen_woke_cfbb59a8), value = woke)
-            Spacer(Modifier.weight(1f))
-        }
+        SleepTime(icon = Icons.Filled.Bedtime, tint = Palette.restBright, label = uiString(R.string.l10n_sleep_screen_asleep_b9692bbe), value = asleep)
+        SleepTime(icon = Icons.Filled.WbSunny, tint = Palette.sleepAwake, label = uiString(R.string.l10n_sleep_screen_woke_cfbb59a8), value = woke)
     }
 }
 
 @Composable
-private fun SleepTime(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+private fun SleepTime(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, label: String, value: String) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
         verticalAlignment = Alignment.CenterVertically,
@@ -1639,7 +1621,7 @@ private fun SleepTime(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
         Icon(
             icon,
             contentDescription = null, // row carries the combined description
-            tint = Palette.restColor,
+            tint = tint,
             modifier = Modifier.size(20.dp),
         )
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space2)) {
@@ -1664,194 +1646,12 @@ private fun NightNavHeader(
     clock: String?,
     onNavigate: (Int) -> Unit,
     session: SleepSession? = null,
-    onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
-    onDeleteSession: (SleepSession) -> Unit = {},
-    onAddNap: (Long, Long) -> Unit = { _, _ -> },
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     val canGoOlder = offset < lastIndex
     val canGoNewer = offset > 0
     val context = LocalContext.current
-    var showTimeChoice by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var editingBed by remember { mutableStateOf(false) }
-    var editingWake by remember { mutableStateOf(false) }
-    var sleepEditDraft by remember(session?.deviceId, session?.startTs) {
-        mutableStateOf<SleepTimeEditDraft?>(null)
-    }
     var showDatePicker by remember { mutableStateOf(false) }
-    // #940 guard 2: a corrected (start, end) window that no longer touches the night's recorded
-    // coverage parks here awaiting an explicit confirm; committing it silently fabricated an
-    // all-awake phantom night that hid the tab's history. null = nothing pending.
-    var pendingDisjointTimes by remember { mutableStateOf<Pair<Long, Long>?>(null) }
-    // Manual nap add (#508): pick a start time, then an end time; both anchored to THIS night's wake day
-    // so the new nap lands on the right day. napStartTs holds the chosen start between the two pickers.
-    var addingNapStart by remember { mutableStateOf(false) }
-    var addingNapEnd by remember { mutableStateOf(false) }
-    var napStartTs by remember { mutableStateOf(0L) }
-    // The DRAFTED nap window awaiting an explicit Save. Neither time picker writes by itself — mirroring
-    // the bed/wake edit's own commit funnel below, which already worked this way (#515/#940). Before this,
-    // the second picker's OK persisted the nap immediately, so tapping through both pickers' prefilled
-    // defaults (start = wake + 1h, end = start + 30m) silently banked a nap the user never intended. That
-    // nap then suppressed the whole overlapping night from the sleepSession table, which is how a night
-    // could show as a ~90-minute stub on the Sleep tab while the daily total and trend chart stayed
-    // correct. null = nothing drafted.
-    var pendingNapWindow by remember { mutableStateOf<Pair<Long, Long>?>(null) }
-
-    // Commit funnel for the COMPLETE drafted window (#515/#940). Neither picker writes by itself:
-    // only Save reaches this function, so an edited bedtime can never be persisted against the old
-    // wake (or vice versa). A window outside the recorded coverage still uses #940's explicit confirm.
-    fun commitTimes(s: SleepSession, newStart: Long, newEnd: Long) {
-        val coverageStart = minOf(s.startTs, s.effectiveStartTs)
-        if (SleepEditGuard.isDisjoint(newStart, newEnd, coverageStart, s.endTs)) {
-            pendingDisjointTimes = newStart to newEnd
-        } else {
-            onUpdateTimes(s, newStart, newEnd)
-        }
-    }
-
-    // Atomic editor (#515): both rows mutate an in-memory draft. Save validates and commits the pair
-    // once; Cancel discards it. This mirrors Apple SleepTimeEditor's single start+end save funnel.
-    val currentDraft = sleepEditDraft
-    if (showTimeChoice && session != null && currentDraft != null) {
-        val timeFmt = SimpleDateFormat("HH:mm", Locale.US)
-        val bedText = timeFmt.format(Date(currentDraft.startTs * 1000L))
-        val wakeText = timeFmt.format(Date(currentDraft.endTs * 1000L))
-        val validated = currentDraft.validatedWindow(System.currentTimeMillis() / 1000L)
-        val blockShape2 = RoundedCornerShape(Metrics.cornerSm)
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = {
-                showTimeChoice = false
-                sleepEditDraft = null
-            },
-            containerColor = Palette.surfaceRaised,
-            titleContentColor = Palette.textPrimary,
-            textContentColor = Palette.textSecondary,
-            title = { Text(uiString(R.string.l10n_sleep_screen_adjust_sleep_times_1e325561), style = NoopType.headline) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(blockShape2)
-                            .background(Palette.surfaceOverlay)
-                            .clickable { showTimeChoice = false; editingBed = true }
-                            .padding(horizontal = Metrics.space16, vertical = Metrics.space14),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Overline("Bedtime", color = Palette.textTertiary)
-                            Spacer(Modifier.height(Metrics.space4))
-                            Text(bedText, style = NoopType.headline, color = Palette.textPrimary)
-                        }
-                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(blockShape2)
-                            .background(Palette.surfaceOverlay)
-                            .clickable { showTimeChoice = false; editingWake = true }
-                            .padding(horizontal = Metrics.space16, vertical = Metrics.space14),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Overline("Wake-up", color = Palette.textTertiary)
-                            Spacer(Modifier.height(Metrics.space4))
-                            Text(wakeText, style = NoopType.headline, color = Palette.textPrimary)
-                        }
-                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = validated != null,
-                    onClick = {
-                        val window = validated ?: return@TextButton
-                        showTimeChoice = false
-                        sleepEditDraft = null
-                        commitTimes(session, window.first, window.second)
-                    },
-                ) {
-                    Text(
-                        uiString(R.string.l10n_sleep_screen_save_efc007a3),
-                        style = NoopType.body,
-                        color = if (validated != null) Palette.accent else Palette.textTertiary,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showTimeChoice = false
-                    sleepEditDraft = null
-                }) {
-                    Text(
-                        uiString(R.string.l10n_sleep_screen_cancel_77dfd213),
-                        style = NoopType.body,
-                        color = Palette.textSecondary,
-                    )
-                }
-            },
-        )
-    }
-
-    // Bed-time picker mutates only the draft. Returning to the parent dialog lets the user inspect and
-    // adjust BOTH endpoints before the single Save (#515). The cross-midnight correction stays in the
-    // pure SleepTimeEditDraft/SleepEditGuard path pinned by JVM tests.
-    val draftForBed = sleepEditDraft
-    if (editingBed && session != null && draftForBed != null) {
-        val startCal = Calendar.getInstance().apply { timeInMillis = draftForBed.startTs * 1000L }
-        DisposableEffect(Unit) {
-            val dialog = TimePickerDialog(
-                context,
-                { _, h, m ->
-                    val cal = Calendar.getInstance().apply {
-                        timeInMillis = draftForBed.startTs * 1000L
-                        set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
-                        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                    }
-                    sleepEditDraft = draftForBed.withBedCandidate(
-                        candidateBedTs = cal.timeInMillis / 1000L,
-                        nowTs = System.currentTimeMillis() / 1000L,
-                    )
-                },
-                startCal.get(Calendar.HOUR_OF_DAY),
-                startCal.get(Calendar.MINUTE),
-                true,
-            ).apply { setTitle("Bedtime") }
-            dialog.setOnDismissListener {
-                editingBed = false
-                if (sleepEditDraft != null) showTimeChoice = true
-            }
-            dialog.show()
-            onDispose { runCatching { dialog.dismiss() } }
-        }
-    }
-
-    // Wake-up picker also mutates only the draft. Its calendar day is derived from the DRAFT bedtime,
-    // so editing bedtime first and wake second produces one coherent cross-midnight window (#515/#406).
-    val draftForWake = sleepEditDraft
-    if (editingWake && session != null && draftForWake != null) {
-        val endCal = Calendar.getInstance().apply { timeInMillis = draftForWake.endTs * 1000L }
-        DisposableEffect(Unit) {
-            val dialog = TimePickerDialog(
-                context,
-                { _, h, m ->
-                    sleepEditDraft = draftForWake.withWakeTime(hour = h, minute = m)
-                },
-                endCal.get(Calendar.HOUR_OF_DAY),
-                endCal.get(Calendar.MINUTE),
-                true,
-            ).apply { setTitle("Wake-up time") }
-            dialog.setOnDismissListener {
-                editingWake = false
-                if (sleepEditDraft != null) showTimeChoice = true
-            }
-            dialog.show()
-            onDispose { runCatching { dialog.dismiss() } }
-        }
-    }
 
     // Date jump — capped at today so a future night can't be selected.
     if (showDatePicker && onPickNightDate != null) {
@@ -1876,213 +1676,59 @@ private fun NightNavHeader(
         }
     }
 
-    // Manual nap (#508) step 1: pick the nap's START time, anchored to the night's wake DAY (a natural
-    // place to look for a missed daytime nap). Defaults to ~1h after the night's wake.
-    if (addingNapStart && session != null) {
-        val anchorTs = session.endTs + 3_600L
-        val startCal = Calendar.getInstance().apply { timeInMillis = anchorTs * 1000L }
-        DisposableEffect(Unit) {
-            val dialog = TimePickerDialog(
-                context,
-                { _, h, m ->
-                    val cal = Calendar.getInstance().apply {
-                        timeInMillis = anchorTs * 1000L
-                        set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
-                        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                    }
-                    // #940: a nap being logged already happened. The anchor day is the night's wake
-                    // day (usually today), so a picked time later than the clock means the most
-                    // recent PAST occurrence: snap back a day (no wake rule here; a nap after the
-                    // night's wake is normal).
-                    napStartTs = SleepEditGuard.autoCorrectedBed(
-                        previousBedTs = anchorTs,
-                        candidateBedTs = cal.timeInMillis / 1000L,
-                        originalWakeTs = null,
-                        nowTs = System.currentTimeMillis() / 1000L,
-                    )
-                    addingNapStart = false
-                    addingNapEnd = true
-                },
-                startCal.get(Calendar.HOUR_OF_DAY),
-                startCal.get(Calendar.MINUTE),
-                true,
-            ).apply { setTitle("Nap started") }
-            dialog.setOnDismissListener { addingNapStart = false }
-            dialog.show()
-            onDispose { runCatching { dialog.dismiss() } }
-        }
-    }
-
-    // Manual nap (#508) step 2: pick the nap's END time — TIME-ONLY, its day DERIVED from the chosen start
-    // (first instant strictly after start, within 24h), mirroring the wake-edit cross-day constraint so a
-    // nap can't be re-bucketed onto the wrong day. Then hand (start, end) to onAddNap.
-    if (addingNapEnd && napStartTs > 0L) {
-        val endCal = Calendar.getInstance().apply { timeInMillis = (napStartTs + 30 * 60L) * 1000L }
-        DisposableEffect(Unit) {
-            val dialog = TimePickerDialog(
-                context,
-                { _, h, m ->
-                    val startTs = napStartTs
-                    val cal = Calendar.getInstance().apply {
-                        timeInMillis = startTs * 1000L
-                        set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
-                        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                        if (timeInMillis / 1000L <= startTs) add(Calendar.DAY_OF_MONTH, 1)
-                    }
-                    // Draft it — the explicit Save below is what actually adds the nap.
-                    pendingNapWindow = startTs to (cal.timeInMillis / 1000L)
-                    addingNapEnd = false
-                    napStartTs = 0L
-                },
-                endCal.get(Calendar.HOUR_OF_DAY),
-                endCal.get(Calendar.MINUTE),
-                true,
-            ).apply { setTitle("Nap ended") }
-            dialog.setOnDismissListener { addingNapEnd = false }
-            dialog.show()
-            onDispose { runCatching { dialog.dismiss() } }
-        }
-    }
-
-    // Manual nap (#508) step 3: the explicit SAVE. The two pickers only DRAFT a window; nothing is
-    // written until this is confirmed, so backing out of the flow (or tapping through the prefilled
-    // defaults) can no longer bank a nap the user never meant to add — which previously also erased the
-    // overlapping night from the Sleep tab. Mirrors the bed/wake edit's Save-only commit funnel.
-    val draftedNap = pendingNapWindow
-    if (draftedNap != null) {
-        val (napStart, napEnd) = draftedNap
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { pendingNapWindow = null },
-            containerColor = Palette.surfaceRaised,
-            titleContentColor = Palette.textPrimary,
-            textContentColor = Palette.textSecondary,
-            title = { Text("Add this nap?", style = NoopType.headline) },
-            text = {
-                Text(
-                    "${clockLabelFor(napStart, napEnd)}\n" +
-                        "${durationText((napEnd - napStart) / 60.0)} of sleep will be added.",
-                    style = NoopType.subhead,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onAddNap(napStart, napEnd)
-                    pendingNapWindow = null
-                }) { Text("Save nap", style = NoopType.subhead, color = Palette.accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingNapWindow = null }) {
-                    Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213), style = NoopType.subhead, color = Palette.textSecondary)
-                }
-            },
-        )
-    }
-
-    // #940 guard 2's consent step: the corrected window no longer touches the night's recorded
-    // coverage, so there is nothing to stage it from. Same wording as the iOS SleepTimeEditor alert.
-    val pendingTimes = pendingDisjointTimes
-    if (pendingTimes != null && session != null) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { pendingDisjointTimes = null },
-            containerColor = Palette.surfaceRaised,
-            titleContentColor = Palette.textPrimary,
-            textContentColor = Palette.textSecondary,
-            title = { Text(uiString(R.string.l10n_sleep_screen_move_this_sleep_438dd3b5), style = NoopType.headline) },
-            text = {
-                Text(
-                    uiString(R.string.l10n_sleep_screen_this_moves_the_night_to_a_fac2fb46),
-                    style = NoopType.subhead,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onUpdateTimes(session, pendingTimes.first, pendingTimes.second)
-                    pendingDisjointTimes = null
-                }) { Text(uiString(R.string.l10n_sleep_screen_move_anyway_19ee824d), style = NoopType.subhead, color = Palette.statusWarning) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDisjointTimes = null }) {
-                    Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213), style = NoopType.subhead, color = Palette.textSecondary)
-                }
-            },
-        )
-    }
-
     val nightLabel = nightRelativeLabel(offset)
-    val blockShape = RoundedCornerShape(Metrics.cornerSm)
-    val clockParts = clock?.split(" · ", limit = 2)
-    val dateLabel = clockParts?.getOrNull(0)
-    val timeLabel = clockParts?.getOrNull(1)
+    val dateLabel = clock?.split(" · ", limit = 2)?.getOrNull(0)
 
+    // Flat date selector — no bounding pill (2026-08): chevrons + type sit directly on the merged
+    // card's surface, matching WeekReviewNavBar's shape (WeekInReviewScreen.kt) rather than the old
+    // bordered/filled chip. Two weighted Spacers true-center the label (a Column.weight(1f) would only
+    // center the label's OWN content, not the label block itself within the row).
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
+        val prevInteraction = remember { MutableInteractionSource() }
+        val nextInteraction = remember { MutableInteractionSource() }
+        val labelInteraction = remember { MutableInteractionSource() }
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Metrics.selectorSpacing),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { if (canGoOlder) onNavigate(offset + 1) }, enabled = canGoOlder) {
+            IconButton(
+                onClick = { if (canGoOlder) onNavigate(offset + 1) },
+                enabled = canGoOlder,
+                interactionSource = prevInteraction,
+                modifier = Modifier.liquidPress(prevInteraction),
+            ) {
                 Icon(Icons.Filled.ChevronLeft, contentDescription = uiString(R.string.l10n_sleep_screen_previous_night_9f339047), tint = if (canGoOlder) Palette.accent else Palette.textTertiary)
             }
+            Spacer(Modifier.weight(1f))
+            // Stacked headline + footnote, matching WeekReviewNavBar's label/subtitle size exactly
+            // (WeekInReviewScreen.kt) — was a small inline caption pair, read too small next to that
+            // nav bar's own "This week" line.
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(blockShape)
-                    // Clean material surface (matches DayNavBar) — no gold wash behind the date;
-                    // the gold pop lives only on the date text below.
-                    .background(Palette.surfaceInset)
-                    .border(Metrics.divider, Palette.hairline, blockShape)
-                    .clickable(enabled = onPickNightDate != null, onClickLabel = "Pick night date") { showDatePicker = true }
-                    .padding(vertical = Metrics.selectorPadding, horizontal = Metrics.selectorPadding),
+                    .clickable(
+                        enabled = onPickNightDate != null,
+                        interactionSource = labelInteraction,
+                        indication = null,
+                        onClickLabel = "Pick night date",
+                    ) { showDatePicker = true }
+                    .liquidPress(labelInteraction)
+                    .padding(vertical = Metrics.space6, horizontal = Metrics.space10),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(nightLabel, style = NoopType.caption, color = Palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(nightLabel, style = NoopType.headline, color = Palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (dateLabel != null) {
-                    Text(dateLabel, style = NoopType.captionNumber, color = Palette.accentHover, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(dateLabel, style = NoopType.footnote, color = Palette.accentHover, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            IconButton(onClick = { if (canGoNewer) onNavigate(offset - 1) }, enabled = canGoNewer) {
+            Spacer(Modifier.weight(1f))
+            IconButton(
+                onClick = { if (canGoNewer) onNavigate(offset - 1) },
+                enabled = canGoNewer,
+                interactionSource = nextInteraction,
+                modifier = Modifier.liquidPress(nextInteraction),
+            ) {
                 Icon(Icons.Filled.ChevronRight, contentDescription = uiString(R.string.l10n_sleep_screen_next_night_7deeb06b), tint = if (canGoNewer) Palette.accent else Palette.textTertiary)
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                timeLabel ?: clock ?: "—",
-                style = NoopType.captionNumber,
-                color = Palette.accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (session != null) {
-                Spacer(Modifier.width(Metrics.space6))
-                Icon(
-                    Icons.Filled.Edit,
-                    contentDescription = uiString(R.string.l10n_sleep_screen_adjust_sleep_times_1e325561),
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(14.dp).clickable {
-                        sleepEditDraft = SleepTimeEditDraft(session.effectiveStartTs, session.endTs)
-                        showTimeChoice = true
-                    },
-                )
-                Spacer(Modifier.width(Metrics.space12))
-                Icon(
-                    Icons.Filled.DeleteOutline,
-                    contentDescription = uiString(R.string.l10n_sleep_screen_delete_this_sleep_session_6932e931),
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(14.dp).clickable { showDeleteConfirm = true },
-                )
-                // Add a missed nap as its OWN session (#508) — staged from raw, never folded into this
-                // night's main sleep. Two pickers (start → end), the end day derived from the start.
-                Spacer(Modifier.width(Metrics.space12))
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = uiString(R.string.l10n_sleep_screen_add_a_nap_a1b3204f),
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(14.dp).clickable { addingNapStart = true },
-                )
             }
         }
         // When the older-night arrow is disabled because no earlier night is banked yet, the chevron
@@ -2097,43 +1743,6 @@ private fun NightNavHeader(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-    }
-
-    // Confirm before removing the night — the same on-brand AlertDialog the time-edit chooser
-    // uses (surfaceRaised, Noop type tokens), not a bare Material default. (#281)
-    if (showDeleteConfirm && session != null) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            containerColor = Palette.surfaceRaised,
-            titleContentColor = Palette.textPrimary,
-            textContentColor = Palette.textSecondary,
-            title = { Text(uiString(R.string.l10n_sleep_screen_delete_this_sleep_session_c347b909), style = NoopType.headline) },
-            text = {
-                // A detected night is tombstoned so it won't re-detect; a userEdited/nap row writes no
-                // tombstone, so its copy drops that (false) promise. Mirrors the undo banner. (#65)
-                Text(
-                    if (session.userEdited) {
-                        "Removes this sleep and recomputes the day without it. You can undo for a few seconds after."
-                    } else {
-                        "Removes this recorded sleep and recomputes the day without it. NOOP won't re-detect sleep in this window. You can undo for a few seconds after."
-                    },
-                    style = NoopType.subhead,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteConfirm = false
-                    onDeleteSession(session)
-                }) {
-                    Text(uiString(R.string.l10n_sleep_screen_delete_f6fdbe48), style = NoopType.headline, color = Palette.statusCritical)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213), style = NoopType.subhead, color = Palette.textTertiary)
-                }
-            },
-        )
     }
 }
 
