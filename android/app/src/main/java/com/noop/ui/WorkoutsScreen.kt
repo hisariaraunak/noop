@@ -2,6 +2,7 @@ package com.noop.ui
 
 import com.noop.R
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
@@ -12,12 +13,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import android.app.DatePickerDialog
@@ -78,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
@@ -126,11 +132,16 @@ import kotlin.math.roundToInt
  * an empty window auto-widens to the next larger range, exactly like the macOS screen.
  */
 @Composable
-fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
+fun WorkoutsScreen(
+    vm: AppViewModel,
+    onOpenWorkout: (WorkoutRow) -> Unit = {},
+    // Route-arg-ready range name, not WorkoutRange itself — WorkoutRange is `internal` (shared
+    // with WorkoutsAnalysisScreen.kt) and this composable's own signature is public.
+    onOpenAnalysis: (String) -> Unit = {},
+) {
     // The ViewModel owns the loaded rows now (ALL sources incl. detected, dismissed-filtered) so a
     // mutation (add / edit / relabel / dismiss / delete) republishes the list and the screen updates.
     val allRows by vm.workouts.collectAsState()
-    val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
     // Cached daily metrics — the Charge side of the post-log activity-cost note (#439).
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     var loaded by remember { mutableStateOf(false) }
@@ -167,7 +178,6 @@ fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
     // A transient one-line note shown after a manual save / relabel for a sport that already has a
     // solid/building ActivityCost entry — "Sessions like this usually …" (#439). Auto-clears.
     var postLogNote by remember { mutableStateOf<String?>(null) }
-    var recoveryTrend by remember { mutableStateOf<List<WorkoutRecoveryTrendPoint>>(emptyList()) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
     // / relabelDetected reload `vm.workouts` asynchronously, so we wait for `allRows` to update before
     // computing the note (otherwise it would read the pre-save list). Cleared once consumed.
@@ -185,25 +195,9 @@ fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
         }
     }
 
-    // #516: use the same active filter/range as the workout page, capped to 90 days. The cap keeps a deep
-    // imported history from launching hundreds of raw-HR reads; W/M/3M are the promised trend views.
-    val recoveryRange = run {
-        val resolved = effectiveRange(allRows, range, filter)
-        if (resolved.days == null || resolved.days > 90) WorkoutRange.Quarter else resolved
-    }
-    val recoveryRows = filter.apply(sessions(allRows, recoveryRange)).sortedBy { it.startTs }
-    val recoveryInputKey = buildString {
-        append(recoveryRange.name)
-        recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
-    }
-    LaunchedEffect(recoveryInputKey, vm.activeStrapId, lastHistorySyncAt) {
-        val built = ArrayList<WorkoutRecoveryTrendPoint>()
-        for (row in recoveryRows) {
-            val result = vm.workoutHeartRateRecovery(row.startTs, row.endTs, row.source, row.deviceId) ?: continue
-            built += WorkoutRecoveryTrendPoint(row.startTs, result)
-        }
-        recoveryTrend = built
-    }
+    // #516/2026-08: the recovery-trend chart (like Breakdown/HR-zones) moved to its own
+    // WorkoutsAnalysisScreen — it computes this same window independently there now, unfiltered,
+    // so this screen no longer needs to carry the recovery-trend state.
 
     LaunchedEffect(Unit) {
         vm.loadWorkouts()
@@ -281,18 +275,18 @@ fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
             )
             }
             postLogNote?.let { item { PostLogNoteBanner(it) } }
-            item { EffortHero(rows = windowRows, effectiveRange = resolved, groups = groups) }
-            item { SummarySection(rows = windowRows, effectiveRange = resolved, groups = groups) }
-            item { BreakdownSection(groups = groups, rows = windowRows) }
-            item { ZonesSection(windowRows) }
-            if (recoveryTrend.isNotEmpty()) {
-                item { RecoveryTrendSection(recoveryTrend, recoveryRange.localizedCaption()) }
+            item {
+                val storyCards = remember(windowRows, resolved) {
+                    workoutStoryCards(allRows, resolved, windowRows, groups)
+                }
+                WorkoutsHeroPager(storyCards = storyCards, rows = windowRows)
             }
             item {
             SessionsSection(
                 rows = windowRows,
                 selectionMode = selectionMode,
                 selectedKeys = selectedKeys,
+                onOpenAnalysis = { onOpenAnalysis(resolved.name) },
                 onToggleSelectMode = {
                     selectionMode = !selectionMode
                     if (!selectionMode) selectedKeys = emptySet()
@@ -354,11 +348,6 @@ fun WorkoutsScreen(vm: AppViewModel, onOpenWorkout: (WorkoutRow) -> Unit = {}) {
 
 /** Drives the manual add/edit dialog. [editing] null = add a new workout, non-null = edit it. */
 private data class DialogTarget(val editing: WorkoutRow?)
-
-private data class WorkoutRecoveryTrendPoint(
-    val startTs: Long,
-    val result: HeartRateRecovery.Result,
-)
 
 // MARK: - Empty / loading state
 
@@ -642,99 +631,220 @@ private fun MergeSportDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
 /** #64: the selection key for a row (its natural key), stable across a reload so checkmarks persist. */
 private fun sessionSelectionKey(row: WorkoutRow): String = "${row.startTs}|${row.sport}"
 
-// MARK: - Liquid hero tokens (the liquid Workouts restyle)
-//
-// The frosted card the Effort vessel floats on, mirroring the iOS/Today LiquidTodayView heroCard. `fill`
-// is a translucent near-black (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessel + the
-// white count-up read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge. (These
-// are file-scoped to Workouts — the Today equivalents are private to that file.)
-private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIQUID_HERO_RADIUS: Dp = 26.dp
+// MARK: - Hero pager (2026-08 redesign): swipeable story cards ending on a two-tone Effort+stats
+// hero, replacing the old vessel hero + separate summary-tile grid. Mirrors the HorizontalPager +
+// dot-indicator pattern WeekInReviewScreen.kt built first (WeekStoryPager/StoryCardContent) — same
+// "top swipes, content below stays fixed" split, same "never a blank card" discipline.
 
-// MARK: - Effort hero (typical-effort liquid vessel over the day-of-sky)
-//
-// The liquid restyle of the Effort hero: the typical session Effort as a filling LiquidVessel with the
-// headline number counting up over it (the Today HeroScoreVessel idiom), inside a translucent near-black
-// frosted card that floats over the screen-level liquid sky. The vessel FILL fraction reads the AVERAGE
-// per-session strain on the stored 0–100 Effort axis (scale-independent, so the fill is identical whether
-// the user's display scale is Effort 0–100 or WHOOP 0–21); the count-up NUMBER is shown on the user's
-// scale via UnitFormatter, exactly as the old StrainGauge label was. The scenic backdrop + BevelGauge are
-// gone — the frosted card does the contrast work over the sky, matching the iOS liquid hero.
+private val WORKOUTS_HERO_RADIUS: Dp = 26.dp
+private val WORKOUTS_HERO_HEIGHT: Dp = 168.dp
+
+/** One computed narrative sentence, coloured by whether it's a good-news or a heads-up move —
+ *  mirrors WeekInReviewScreen's moverTint "wash reacts to content" rule. */
+internal data class WorkoutStoryCard(val text: String, val tint: Color)
+
+/**
+ * 0-2 story cards, each independently gated — omitted, never blanked, when there's nothing worth
+ * saying. No previous-period comparison exists for [WorkoutRange.All] (open-ended) or a window
+ * under 2 sessions, so both candidates are skipped outright there. Pure, no Compose — reuses the
+ * SAME `sessions()`/`effectiveRange()` cutoff math as the rest of this screen, just shifted back
+ * one interval for the "previous period" slice, so no new date logic is introduced.
+ */
+internal fun workoutStoryCards(
+    allRows: List<WorkoutRow>,
+    resolved: WorkoutRange,
+    windowRows: List<WorkoutRow>,
+    groups: List<SportGroup>,
+): List<WorkoutStoryCard> {
+    val days = resolved.days
+    if (days == null || windowRows.size < 2) return emptyList()
+    val last = allRows.maxOfOrNull { it.startTs } ?: return emptyList()
+    val prevCutoffEnd = last - days * 86_400L
+    val prevCutoffStart = last - 2L * days * 86_400L
+    val prevRows = allRows.filter { it.startTs in prevCutoffStart until prevCutoffEnd }
+
+    val cards = mutableListOf<WorkoutStoryCard>()
+    // Candidate 1: top-sport trend — only a genuine up-move or a sport that's new this period;
+    // flat/down says nothing rather than manufacture a downbeat sentence.
+    groups.firstOrNull()?.let { top ->
+        val prevCount = prevRows.count { it.sport == top.sport }
+        val name = WorkoutEditing.displaySport(top.sport)
+        val sessionWord = if (top.count == 1) "session" else "sessions"
+        when {
+            prevRows.isEmpty() ->
+                cards += WorkoutStoryCard(
+                    "$name is your top sport this ${resolved.heroWord} — ${top.count} $sessionWord.",
+                    Palette.effortColor,
+                )
+            prevCount < top.count ->
+                cards += WorkoutStoryCard(
+                    "$name is your top sport — ${top.count} sessions, up from $prevCount last ${resolved.heroWord}.",
+                    Palette.effortColor,
+                )
+        }
+    }
+    // Candidate 2: average-effort trend, only when both windows have enough signal and the swing
+    // clears a 10% floor.
+    val curStrains = windowRows.mapNotNull { it.strain }
+    val prevStrains = prevRows.mapNotNull { it.strain }
+    if (curStrains.size >= 2 && prevStrains.size >= 2) {
+        val curAvg = curStrains.average()
+        val prevAvg = prevStrains.average()
+        if (prevAvg > 0.0) {
+            val pct = (curAvg - prevAvg) / prevAvg
+            if (kotlin.math.abs(pct) >= 0.10) {
+                val up = pct > 0
+                cards += WorkoutStoryCard(
+                    "Average effort is ${if (up) "up" else "down"} ${(kotlin.math.abs(pct) * 100).roundToInt()}% from last ${resolved.heroWord}.",
+                    if (up) Palette.statusWarning else Palette.statusPositive,
+                )
+            }
+        }
+    }
+    return cards.take(2)
+}
+
+private sealed class WorkoutCard {
+    data class Story(val card: WorkoutStoryCard) : WorkoutCard()
+    object Hero : WorkoutCard()
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WorkoutsHeroPager(
+    storyCards: List<WorkoutStoryCard>,
+    rows: List<WorkoutRow>,
+) {
+    // The hero+stats card is ALWAYS last and always present, so the raw numbers are never more
+    // than one swipe away — only the story cards ahead of it are conditional.
+    val cards = remember(storyCards) { storyCards.map { WorkoutCard.Story(it) } + WorkoutCard.Hero }
+    val pagerState = rememberPagerState(pageCount = { cards.size })
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth().height(WORKOUTS_HERO_HEIGHT),
+            pageSpacing = Metrics.space10,
+        ) { page ->
+            when (val card = cards[page]) {
+                is WorkoutCard.Story -> WorkoutStoryCardContent(card.card)
+                WorkoutCard.Hero -> TwoToneEffortHero(rows = rows)
+            }
+        }
+        if (cards.size > 1) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                repeat(cards.size) { i ->
+                    val active = pagerState.currentPage == i
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(if (active) 7.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(if (active) Palette.effortColor else Palette.textTertiary.copy(alpha = 0.4f)),
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
-private fun EffortHero(
-    rows: List<WorkoutRow>,
-    effectiveRange: WorkoutRange,
-    groups: List<SportGroup>,
-) {
-    val effortScale = UnitPrefs.effortScale(LocalContext.current)
-    val strains = rows.mapNotNull { it.strain }
-    val hasEffort = strains.isNotEmpty()
-    val avgStrain = if (strains.isEmpty()) 0.0 else strains.sum() / strains.size
-    // Fill fraction on the stored 0–100 Effort axis — scale-independent, so the vessel fills the same on
-    // either display scale. The count-up number below tracks the user's chosen scale.
-    val fraction = (avgStrain / 100.0).coerceIn(0.0, 1.0)
-    val shownEffort = UnitFormatter.effortValue(avgStrain, effortScale)
-    val totalTimeH = rows.mapNotNull { it.durationS }.sum() / 3600.0
-
-    // The liquid hero CARD: a translucent near-black that floats over the day-of-sky so the vessel + white
-    // count-up read crisp. Radius 26 + a faint white hairline give the frosted-glass edge of the iOS liquid
-    // heroCard (heroFill = rgba(13,14,20,.80), stroke white@0.11). Matches the Today pilot.
+private fun WorkoutStoryCardContent(card: WorkoutStoryCard) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
-            .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
-            .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(WORKOUTS_HERO_RADIUS))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        card.tint.copy(alpha = if (Palette.isLight) 0.24f else 0.30f),
+                        Palette.surfaceRaised,
+                    ),
+                ),
+            )
+            .border(1.dp, card.tint.copy(alpha = 0.35f), RoundedCornerShape(WORKOUTS_HERO_RADIUS))
             .padding(20.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Overline("Typical effort", color = Palette.effortColor)
-                Box(modifier = Modifier.size(140.dp), contentAlignment = Alignment.Center) {
-                    LiquidVessel(
-                        value = fraction,
-                        tint = Palette.effortColor,
-                        // Only slosh once a real Effort value is loaded; an empty window poses static + empty.
-                        animated = hasEffort,
-                        modifier = Modifier.size(140.dp),
-                    )
-                    if (hasEffort) {
-                        // Count-up number over the vessel — white, tabular, a soft shadow for legibility,
-                        // hit-transparent so the tap reaches the vessel (splash). Honours the Effort scale.
-                        CountUpText(
-                            // `shownEffort` is already the display-scaled value, so the interpolated `it` is
-                            // in the user's scale — roll it up with the same one-decimal format as before.
-                            value = shownEffort,
-                            format = { oneDecimal(it) },
-                            style = NoopType.number(30f, weight = FontWeight.Bold)
-                                .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.5f), offset = Offset(0f, 1f), blurRadius = 6f)),
-                            color = Color.White,
-                            modifier = Modifier.clearAndSetSemantics {},
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.width(20.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    uiString(R.string.l10n_workouts_screen_effort_this_effectiverange_heroword_0bd5e794, effectiveRange.heroWord),
-                    style = NoopType.headline,
-                    color = Palette.textPrimary,
+        Text(card.text, style = NoopType.title2, color = Palette.textPrimary)
+    }
+}
+
+/**
+ * The always-last hero card: a two-tone split, not a vessel/ring (2026-08 redesign, replacing the
+ * old LiquidVessel-based EffortHero + a separate SummarySection tile grid). LEFT is a solid
+ * Effort-blue panel carrying the headline avg-Effort count-up + session count; RIGHT is a dark
+ * stat column (Calories/Distance/Active), exactly the same five data points EffortHero+
+ * SummarySection computed before, just re-laid-out. "Most active sport" — previously its own
+ * SummarySection tile — moved to a story-card sentence instead (see [workoutStoryCards]), so it
+ * isn't repeated here.
+ */
+@Composable
+private fun TwoToneEffortHero(rows: List<WorkoutRow>) {
+    val effortScale = UnitPrefs.effortScale(LocalContext.current)
+    val unitSystem = UnitPrefs.system(LocalContext.current)
+    val strains = rows.mapNotNull { it.strain }
+    val hasEffort = strains.isNotEmpty()
+    val avgStrain = if (strains.isEmpty()) 0.0 else strains.sum() / strains.size
+    val shownEffort = UnitFormatter.effortValue(avgStrain, effortScale)
+    val totalTimeH = rows.mapNotNull { it.durationS }.sum() / 3600.0
+    val totalKcal = rows.mapNotNull { it.energyKcal }.sum()
+    val totalKm = rows.mapNotNull { it.distanceM }.sum() / 1000.0
+    val op = CardAppearance.opacity
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(WORKOUTS_HERO_RADIUS))
+            .border(1.dp, Palette.hairline.copy(alpha = op), RoundedCornerShape(WORKOUTS_HERO_RADIUS)),
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1.1f)
+                .fillMaxHeight()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Palette.effortBright.copy(alpha = op),
+                            Palette.effortColor.copy(alpha = op),
+                            Palette.effortDeep.copy(alpha = op),
+                        ),
+                    ),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap), modifier = Modifier.fillMaxWidth()) {
-                    HeroStat("Sessions", "${rows.size}", Palette.effortColor, Modifier.weight(1f))
-                    HeroStat("Active", oneDecimal(totalTimeH) + "h", Palette.textPrimary, Modifier.weight(1f))
-                }
-                // 2026-08 audit: dropped the "Mostly {sport}" caption that used to sit here — the
-                // Summary grid's "Most Active" tile below states the same modal sport, more scannably.
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (hasEffort) {
+                CountUpText(
+                    value = shownEffort,
+                    format = { oneDecimal(it) },
+                    style = NoopType.number(32f, weight = FontWeight.Bold),
+                    color = Color.White,
+                )
+            } else {
+                Text("–", style = NoopType.number(32f, weight = FontWeight.Bold), color = Color.White)
             }
+            Text("Typical effort", style = NoopType.overline, color = Color.White.copy(alpha = 0.85f))
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "${rows.size} session${if (rows.size == 1) "" else "s"}",
+                style = NoopType.footnote,
+                color = Color.White.copy(alpha = 0.75f),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(Palette.surfaceRaised.copy(alpha = Palette.surfaceRaised.alpha * op))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+        ) {
+            HeroStat("Calories", grouped(totalKcal), Palette.metricAmber)
+            HeroStat("Distance", UnitFormatter.distanceFromKilometers(totalKm, unitSystem), Palette.metricCyan)
+            HeroStat("Active", oneDecimal(totalTimeH) + "h", Palette.textPrimary)
         }
     }
 }
@@ -743,188 +853,18 @@ private fun EffortHero(
 private fun HeroStat(title: String, value: String, tint: Color, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Overline(title)
-        Text(value, style = NoopType.number(20f), color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(value, style = NoopType.number(16f), color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-// MARK: - Summary tiles (uniform StatTiles)
+// MARK: - Activity breakdown, HR zones, recovery trend all moved (2026-08 redesign) to
+// WorkoutsAnalysisScreen.kt, reached via SessionsSection's "View analysis" link — BreakdownSection/
+// SportCard/MiniStat/ZonesSection/RecoveryTrendSection/RecoveryLegend/RecoveryTrendChart/
+// WorkoutRecoveryTrendPoint now live there. ZoneStat stays here (still used by WorkoutDetailBody
+// below) — promoted to `internal` so the new file can reuse it too.
 
 @Composable
-private fun SummarySection(
-    rows: List<WorkoutRow>,
-    effectiveRange: WorkoutRange,
-    groups: List<SportGroup>,
-) {
-    // Imperial/Metric display preference (D#103). Distances are stored in metres; the toggle re-labels
-    // them. Read here so a change recomposes the tiles. Display-only — nothing stored changes.
-    val unitSystem = UnitPrefs.system(LocalContext.current)
-    val totalKcal = rows.mapNotNull { it.energyKcal }.sum()
-    val totalKm = rows.mapNotNull { it.distanceM }.sum() / 1000.0
-    val modal = groups.firstOrNull()
-
-    // 2026-08 audit: dropped "Total Workouts" and "Total Time" tiles here — the hero row right above
-    // this grid already shows both (Sessions/Active), same values, same range. This grid's job is now
-    // the totals the hero DOESN'T cover.
-    //
-    // Kept on StatTile rather than MetricTile — these are range-aggregate totals for whatever's
-    // already selected above, not a grid of distinct metrics each needing their own tap-through
-    // history. Same reasoning as Stress's MarkerTile grid.
-    val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { m ->
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_workouts_screen_total_calories_0a49da20),
-                value = grouped(totalKcal),
-                caption = "kcal",
-                accent = Palette.metricAmber,
-            )
-        },
-        { m ->
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_workouts_screen_total_distance_e8260e11),
-                value = UnitFormatter.distanceFromKilometers(totalKm, unitSystem),
-                caption = "covered",
-                accent = Palette.metricCyan,
-            )
-        },
-        { m ->
-            StatTile(
-                modifier = m,
-                label = uiString(R.string.l10n_workouts_screen_most_active_cf01766b),
-                value = modal?.sport ?: "–",
-                caption = modal?.let { "${it.count} session${if (it.count == 1) "" else "s"}" },
-                accent = Palette.textPrimary,
-            )
-        },
-    )
-
-    // Two-column grid so tile heights stay uniform on phone widths.
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        tiles.chunked(2).forEach { rowTiles ->
-            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                rowTiles.forEach { tile -> tile(Modifier.weight(1f)) }
-                if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-// MARK: - Activity breakdown (per-sport NoopCards, identical layout)
-
-@Composable
-private fun BreakdownSection(groups: List<SportGroup>, rows: List<WorkoutRow>) {
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(
-            title = uiString(R.string.l10n_workouts_screen_activity_breakdown_214431d6),
-            overline = "By sport",
-            trailing = "${groups.size} sport${if (groups.size == 1) "" else "s"}",
-        )
-        // This sport's own sessions, so each card can carry an HR-zone mini-bar.
-        groups.forEach { g -> SportCard(g, zones = zoneSummary(rows.filter { it.sport == g.sport })) }
-    }
-}
-
-@Composable
-private fun SportCard(g: SportGroup, zones: ZoneSummary?) {
-    // Frosted Effort-tinted card with the sport glyph in the Effort world, plus an HR-zone mini-bar
-    // when the sessions carry imported zones.
-    NoopCard(tint = Palette.effortColor) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Identical header for every card.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    sportIcon(g.sport),
-                    contentDescription = null,
-                    tint = Palette.effortColor,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    WorkoutEditing.displaySport(g.sport),
-                    style = NoopType.headline,
-                    color = Palette.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(uiString(R.string.l10n_workouts_screen_g_count_247d8c10, g.count), style = NoopType.number(15f), color = Palette.effortBright)
-            }
-            if (zones != null) {
-                SegmentBar(
-                    segments = zones.minutes.mapIndexed { i, m ->
-                        Palette.hrZoneColor(i + 1) to (m / zones.totalMinutes).toFloat()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    height = 8.dp,
-                )
-            }
-            CardDivider()
-            // Identical 4-up stat strip for every card.
-            Row(modifier = Modifier.fillMaxWidth()) {
-                MiniStat("Sessions", "${g.count}", Modifier.weight(1f))
-                MiniStat("Time", oneDecimal(g.totalTimeH) + "h", Modifier.weight(1f))
-                MiniStat("Kcal", grouped(g.totalKcal), Modifier.weight(1f), tint = Palette.metricAmber)
-                MiniStat("Avg/sess", "${g.avgTimePerSessionMin.roundToInt()}m", Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiniStat(label: String, value: String, modifier: Modifier = Modifier, tint: Color = Palette.textPrimary) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Overline(label)
-        Text(
-            value,
-            style = NoopType.number(15f),
-            color = tint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-// MARK: - HR zones (imported per-workout zone split, one card)
-
-@Composable
-private fun ZonesSection(rows: List<WorkoutRow>) {
-    val z = remember(rows) { zoneSummary(rows) } ?: return
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(
-            title = uiString(R.string.l10n_workouts_screen_hr_zones_293d7175),
-            overline = "Whoop import",
-            trailing = "${z.sessionsWithZones} of ${rows.size} session${if (rows.size == 1) "" else "s"}",
-        )
-        NoopCard(tint = Palette.effortColor) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Proportional stacked bar — the Hypnogram geometry with zone colors.
-                SegmentBar(
-                    segments = z.minutes.mapIndexed { i, m ->
-                        Palette.hrZoneColor(i + 1) to (m / z.totalMinutes).toFloat()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    height = 24.dp,
-                )
-                CardDivider()
-                // 5-up stat strip, identical rhythm to the sport cards' MiniStat row.
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    z.minutes.forEachIndexed { i, m ->
-                        ZoneStat(i + 1, m, z.totalMinutes, Modifier.weight(1f))
-                    }
-                }
-                Text(
-                    uiString(R.string.l10n_workouts_screen_share_of_imported_zone_time_duration_b0985680),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ZoneStat(zone: Int, minutes: Double, total: Double, modifier: Modifier = Modifier) {
+internal fun ZoneStat(zone: Int, minutes: Double, total: Double, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -953,6 +893,7 @@ private fun SessionsSection(
     rows: List<WorkoutRow>,
     selectionMode: Boolean,
     selectedKeys: Set<String>,
+    onOpenAnalysis: () -> Unit,
     onToggleSelectMode: () -> Unit,
     onToggleRow: (WorkoutRow) -> Unit,
     onMerge: (List<WorkoutRow>) -> Unit,
@@ -984,6 +925,19 @@ private fun SessionsSection(
             }
             if (anySelectable) SelectPill(selectionMode, onToggleSelectMode)
         }
+        // 2026-08 redesign: Breakdown/HR-zones/Recovery-trend moved off this screen onto their own
+        // destination — this is the one link back to them, always shown (unlike the select pill,
+        // which needs mergeable rows).
+        Text(
+            "View analysis",
+            style = NoopType.footnote,
+            color = Palette.accent,
+            textAlign = TextAlign.End,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClickLabel = "View activity breakdown, HR zones and recovery trend", onClick = onOpenAnalysis)
+                .padding(vertical = 4.dp),
+        )
         if (selectionMode) SelectionToolbar(chosen, onMerge, onBulkDelete, onCancelSelect)
         NoopCard(padding = 0.dp) {
             Column {
@@ -1483,121 +1437,6 @@ private fun RecoveryStat(label: String, value: Int?, modifier: Modifier = Modifi
     }
 }
 
-/** Shared-axis 1/2/5-minute HRR trend (#516). These are raw bpm changes, not normalized values, so the
- *  distance between lines remains meaningful. Missing minute windows are omitted from that series. */
-@Composable
-private fun RecoveryTrendSection(points: List<WorkoutRecoveryTrendPoint>, rangeCaption: String) {
-    val oneColor = Palette.metricRose
-    val twoColor = Palette.metricCyan
-    val fiveColor = Palette.metricPurple
-    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(
-            title = uiString(R.string.l10n_workouts_screen_recovery_trend_516),
-            overline = uiString(R.string.l10n_workouts_screen_hrr_range_516, rangeCaption),
-            trailing = uiPlural(
-                R.plurals.l10n_workouts_screen_hrr_workout_count_516,
-                points.size,
-                points.size,
-            ),
-        )
-        NoopCard(tint = Palette.metricRose) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                RecoveryTrendChart(
-                    points = points,
-                    oneColor = oneColor,
-                    twoColor = twoColor,
-                    fiveColor = fiveColor,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Metrics.chartHeight),
-                )
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text(dateLabel(points.first().startTs), style = NoopType.footnote, color = Palette.textTertiary)
-                    Spacer(Modifier.weight(1f))
-                    Text(dateLabel(points.last().startTs), style = NoopType.footnote, color = Palette.textTertiary)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    RecoveryLegend(uiString(R.string.l10n_workouts_screen_hrr_one_minute_516), oneColor)
-                    RecoveryLegend(uiString(R.string.l10n_workouts_screen_hrr_two_minutes_516), twoColor)
-                    RecoveryLegend(uiString(R.string.l10n_workouts_screen_hrr_five_minutes_516), fiveColor)
-                }
-                CardDivider()
-                Text(
-                    uiString(R.string.l10n_workouts_screen_hrr_trend_explanation_516),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecoveryLegend(label: String, color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
-        Text(label, style = NoopType.footnote, color = Palette.textSecondary)
-    }
-}
-
-@Composable
-private fun RecoveryTrendChart(
-    points: List<WorkoutRecoveryTrendPoint>,
-    oneColor: Color,
-    twoColor: Color,
-    fiveColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    val allValues = points.flatMap {
-        listOfNotNull(it.result.after1Minute, it.result.after2Minutes, it.result.after5Minutes)
-    }
-    if (allValues.isEmpty()) return
-    val low = allValues.minOrNull() ?: 0
-    val high = allValues.maxOrNull() ?: low
-    val padding = maxOf(4.0, (high - low) * 0.12)
-    val yMin = low - padding
-    val yMax = high + padding
-    val xMin = points.first().startTs
-    val xMax = points.last().startTs
-    val chartDescription = uiString(R.string.l10n_workouts_screen_hrr_chart_accessibility_516)
-
-    Canvas(modifier = modifier.semantics { contentDescription = chartDescription }) {
-        val gridColor = Palette.hairline
-        repeat(4) { index ->
-            val y = size.height * index / 3f
-            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-        }
-
-        fun x(ts: Long): Float = if (xMax == xMin) size.width / 2f
-            else ((ts - xMin).toDouble() / (xMax - xMin).toDouble() * size.width).toFloat()
-        fun y(value: Int): Float =
-            (size.height - ((value - yMin) / (yMax - yMin) * size.height)).toFloat()
-
-        fun drawSeries(color: Color, pick: (HeartRateRecovery.Result) -> Int?) {
-            val series = points.mapNotNull { point -> pick(point.result)?.let { point.startTs to it } }
-            if (series.isEmpty()) return
-            val path = Path()
-            series.forEachIndexed { index, (ts, value) ->
-                val px = x(ts)
-                val py = y(value)
-                if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
-            }
-            if (series.size > 1) {
-                drawPath(
-                    path = path,
-                    color = color,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                )
-            }
-            series.forEach { (ts, value) -> drawCircle(color, radius = 3.5.dp.toPx(), center = Offset(x(ts), y(value))) }
-        }
-
-        drawSeries(oneColor) { it.after1Minute }
-        drawSeries(twoColor) { it.after2Minutes }
-        drawSeries(fiveColor) { it.after5Minutes }
-    }
-}
-
 /**
  * #796 - the workout detail's per-session Effort contribution card. The Effort-amber tinted [NoopCard]
  * carries the captured strain as a big count-up value (the NOOP signature), its scale caption (Effort
@@ -2038,7 +1877,7 @@ private fun workoutFieldColors() = OutlinedTextFieldDefaults.colors(
 // MARK: - Dividers
 
 @Composable
-private fun CardDivider() {
+internal fun CardDivider() {
     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline))
 }
 
@@ -2048,10 +1887,14 @@ private fun FullDivider(alpha: Float = 1f) {
 }
 
 // MARK: - Range model
+//
+// `internal` (2026-08 redesign): WorkoutsAnalysisScreen.kt, the new "View analysis" destination,
+// needs its own independent range picker over this same model — promoted so it stays the ONE
+// source of truth instead of forking a second copy that can drift.
 
 // 2026-08 audit: relabeled from the 7D/30D/90D/1Y/All style (and added Half/6M) to match the
 // app-wide standard range-picker set (W/M/3M/6M/1Y/ALL) used by Trends/Stress/Intelligence/Explore.
-private enum class WorkoutRange(val label: String, val caption: String, val days: Int?, val heroWord: String) {
+internal enum class WorkoutRange(val label: String, val caption: String, val days: Int?, val heroWord: String) {
     Week("W", "last 7 days", 7, "week"),
     Month("M", "last 30 days", 30, "month"),
     Quarter("3M", "last 90 days", 90, "quarter"),
@@ -2061,7 +1904,7 @@ private enum class WorkoutRange(val label: String, val caption: String, val days
 }
 
 /** The HRR card must not interpolate the range enum's legacy English-only caption into localized copy. */
-private fun WorkoutRange.localizedCaption(): String = when (this) {
+internal fun WorkoutRange.localizedCaption(): String = when (this) {
     WorkoutRange.Week -> uiString(R.string.l10n_workouts_screen_hrr_last_7_days_516)
     WorkoutRange.Month -> uiString(R.string.l10n_workouts_screen_hrr_last_30_days_516)
     WorkoutRange.Quarter, WorkoutRange.Half, WorkoutRange.Year, WorkoutRange.All ->
@@ -2076,7 +1919,7 @@ private fun WorkoutRange.widening(): List<WorkoutRange> {
 }
 
 /** Sessions inside a range, RELATIVE TO THE LATEST session. `All` = everything. */
-private fun sessions(all: List<WorkoutRow>, r: WorkoutRange): List<WorkoutRow> {
+internal fun sessions(all: List<WorkoutRow>, r: WorkoutRange): List<WorkoutRow> {
     val days = r.days ?: return all
     val last = all.maxOfOrNull { it.startTs } ?: return emptyList()
     val cutoff = last - days * 86_400L
@@ -2085,7 +1928,7 @@ private fun sessions(all: List<WorkoutRow>, r: WorkoutRange): List<WorkoutRow> {
 
 /** The range actually shown: the selected range if it holds ≥1 session (after the active #64 filter),
  *  else the smallest larger range that does — so only an empty window widens. */
-private fun effectiveRange(all: List<WorkoutRow>, selected: WorkoutRange, filter: WorkoutFilter = WorkoutFilter()): WorkoutRange {
+internal fun effectiveRange(all: List<WorkoutRow>, selected: WorkoutRange, filter: WorkoutFilter = WorkoutFilter()): WorkoutRange {
     if (all.isEmpty()) return selected
     for (r in selected.widening()) {
         if (filter.apply(sessions(all, r)).isNotEmpty()) return r
@@ -2094,7 +1937,7 @@ private fun effectiveRange(all: List<WorkoutRow>, selected: WorkoutRange, filter
 }
 
 /** Pick the tightest range that still holds ≥2 sessions; otherwise show All. */
-private fun defaultRange(source: List<WorkoutRow>): WorkoutRange {
+internal fun defaultRange(source: List<WorkoutRow>): WorkoutRange {
     val last = source.maxOfOrNull { it.startTs } ?: return WorkoutRange.All
     for (r in WorkoutRange.entries) {
         val days = r.days ?: continue
@@ -2106,7 +1949,7 @@ private fun defaultRange(source: List<WorkoutRow>): WorkoutRange {
 
 // MARK: - Aggregation
 
-private data class SportGroup(
+internal data class SportGroup(
     val sport: String,
     val count: Int,
     val totalTimeS: Double,
@@ -2117,7 +1960,7 @@ private data class SportGroup(
 }
 
 /** Sessions grouped by sport, ordered by count (desc), then total time. */
-private fun sportGroups(rows: List<WorkoutRow>): List<SportGroup> =
+internal fun sportGroups(rows: List<WorkoutRow>): List<SportGroup> =
     rows.groupBy { it.sport }
         .map { (sport, list) ->
             SportGroup(
@@ -2222,14 +2065,16 @@ private val WorkoutRow.sourceBadge: Pair<String, Color>
 
 // MARK: - Formatting
 
-private val dateFmt: DateTimeFormatter =
+// `internal` (2026-08 redesign): the relocated Recovery-trend chart in WorkoutsAnalysisScreen.kt
+// still formats dates the same way, so this stays the one shared formatter.
+internal val dateFmt: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US).withZone(ZoneId.systemDefault())
 private val timeFmt: DateTimeFormatter =
     // Respect the device's 12-/24-hour locale (#337): "7:10 AM" or "19:10", not forced 24-hour.
     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
         .withLocale(Locale.getDefault()).withZone(ZoneId.systemDefault())
 
-private fun dateLabel(ts: Long): String = dateFmt.format(Instant.ofEpochSecond(ts))
+internal fun dateLabel(ts: Long): String = dateFmt.format(Instant.ofEpochSecond(ts))
 private fun timeLabel(ts: Long): String = timeFmt.format(Instant.ofEpochSecond(ts))
 
 /** Session span "HH:mm–HH:mm"; start-only when the end isn't after the start (#157). */

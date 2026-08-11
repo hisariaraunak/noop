@@ -140,6 +140,9 @@ private enum class Destination(
     // Group: Activity
     Workouts("workouts", R.string.nav_workouts, Icons.Filled.FitnessCenter),
     WorkoutDetail("workout_detail/{deviceId}/{startTs}", R.string.nav_workouts, Icons.Filled.FitnessCenter),
+    // "View analysis" (2026-08 redesign) — Breakdown/HR-zones/Recovery-trend, moved off the main
+    // Workouts list. Tap-through only (never in a DrawerGroup), same treatment as WorkoutDetail.
+    WorkoutsAnalysis("workouts_analysis/{range}", R.string.nav_workouts, Icons.Filled.FitnessCenter),
     Trends("trends", R.string.nav_trends, Icons.Filled.CalendarMonth),
 
     // Group: Insight
@@ -405,6 +408,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     WorkoutsScreen(
                         viewModel,
                         onOpenWorkout = { row -> nav.navigate("workout_detail/${row.deviceId}/${row.startTs}") },
+                        onOpenAnalysis = { rangeName -> nav.navigate("workouts_analysis/$rangeName") },
                     )
                 }
                 composable(Destination.WorkoutDetail.route) { backStackEntry ->
@@ -412,6 +416,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         vm = viewModel,
                         deviceId = backStackEntry.arguments?.getString("deviceId").orEmpty(),
                         startTs = backStackEntry.arguments?.getString("startTs")?.toLongOrNull() ?: 0L,
+                    )
+                }
+                composable(Destination.WorkoutsAnalysis.route) { backStackEntry ->
+                    WorkoutsAnalysisScreen(
+                        vm = viewModel,
+                        initialRangeName = backStackEntry.arguments?.getString("range"),
                     )
                 }
                 composable(Destination.Intelligence.route) { IntelligenceScreen(viewModel) }
