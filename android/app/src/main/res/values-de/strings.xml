@@ -1874,4 +1874,7 @@
     <string name="onboarding_theme_follow_system">Die Hell-/Dunkel-Einstellung deines Smartphones wird übernommen.</string>
     <string name="onboarding_theme_light_description">Tiefblaue Akzente auf einem warmen, hellen Hintergrund.</string>
     <string name="onboarding_theme_dark_description">Tiefblaue Akzente auf einem dunklen, blaugrauen Hintergrund.</string>
+    <string name="nav_journal">Tagebuch</string>
+    <string name="widget_hr_steps_name">NOOP Herzfrequenz &amp; Schritte</string>
+    <string name="widget_hr_steps_description">Live-Herzfrequenz und heutige Schritte auf einen Blick.</string>
 </resources>
