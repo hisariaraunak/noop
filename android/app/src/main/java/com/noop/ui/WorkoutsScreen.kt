@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -30,13 +31,10 @@ import android.app.TimePickerDialog
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.automirrored.filled.MergeType
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
@@ -82,6 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -153,27 +152,12 @@ fun WorkoutsScreen(
     // The manual add/edit dialog target: Some(null) = add, Some(row) = edit, null = closed.
     var dialog by remember { mutableStateOf<DialogTarget?>(null) }
 
-    // #64: filters beyond the time range — sport (null = all), source class (null = all), free-text
-    // search over the displayed sport. The pure WorkoutFilter applies them AFTER the window cut.
-    var sportFilter by remember { mutableStateOf<String?>(null) }
-    var sourceFilter by remember { mutableStateOf<WorkoutSource?>(null) }
-    var searchText by remember { mutableStateOf("") }
-    val filter = WorkoutFilter(sportFilter, sourceFilter, searchText)
-
     // #64: multi-select + merge. `selectionMode` toggles the leading checkmarks + the toolbar strip;
     // `selectedKeys` holds the natural keys ("startTs|sport") of the chosen rows. Only MANUAL / DETECTED
     // rows are selectable (imported history is read-only). `mergeSportPrompt` names an all-detected merge.
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var mergeSportPrompt by remember { mutableStateOf<List<WorkoutRow>?>(null) }
-
-    // #64: displayed-sport names across ALL loaded rows, most-frequent first, for the sport-filter menu.
-    // Computed here (a @Composable scope) since the LazyScreenScaffold content lambda is a LazyListScope.
-    val availableSports = remember(allRows) {
-        allRows.groupingBy { WorkoutEditing.displaySport(it.sport) }.eachCount()
-            .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-            .map { it.key }
-    }
 
     // A transient one-line note shown after a manual save / relabel for a sport that already has a
     // solid/building ActivityCost entry — "Sessions like this usually …" (#439). Auto-clears.
@@ -224,6 +208,7 @@ fun WorkoutsScreen(
     val skyCtx = androidx.compose.ui.platform.LocalContext.current
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(skyCtx) }
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(skyCtx) }
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyScreenScaffold(
         title = uiString(R.string.l10n_workouts_screen_workouts_ccb58b22),
         subtitle = "Every session, threaded together.",
@@ -246,10 +231,10 @@ fun WorkoutsScreen(
             EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
             }
         } else {
-            // Resolve the effective range + windowed rows + per-sport groups once. #64: the pure
-            // WorkoutFilter narrows the window AFTER the range cut, so every section reads one filtered set.
-            val resolved = effectiveRange(allRows, range, filter)
-            val windowRows = filter.apply(sessions(allRows, resolved))
+            // Resolve the effective range + windowed rows + per-sport groups once. The Sport/Source/search
+            // filter bar was removed (2026-08) — every session in the range now always shows.
+            val resolved = effectiveRange(allRows, range)
+            val windowRows = sessions(allRows, resolved)
             val groups = sportGroups(windowRows)
             val fellBack = resolved != range
 
@@ -259,19 +244,7 @@ fun WorkoutsScreen(
                 effectiveRange = resolved,
                 rowCount = windowRows.size,
                 fellBack = fellBack,
-                filterActive = filter.isActive,
                 onSelect = { range = it },
-                onAdd = { dialog = DialogTarget(null) },
-            )
-            }
-            item {
-            FilterBar(
-                filter = filter,
-                availableSports = availableSports,
-                onSport = { sportFilter = it },
-                onSource = { sourceFilter = it },
-                onSearch = { searchText = it },
-                onClear = { sportFilter = null; sourceFilter = null; searchText = "" },
             )
             }
             postLogNote?.let { item { PostLogNoteBanner(it) } }
@@ -319,6 +292,16 @@ fun WorkoutsScreen(
             )
             }
         }
+    }
+    // 2026-08 redesign: the inline Add button (previously stacked above the range pill) is now a
+    // floating action button, docked bottom-end like Today's own QuickActionFab — same visual recipe,
+    // duplicated here since it opens the manual-add dialog rather than Today's quick-actions sheet.
+    if (allRows.isNotEmpty()) {
+        WorkoutsAddFab(
+            onClick = { dialog = DialogTarget(null) },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 20.dp),
+        )
+    }
     }
 
     // #64: name an all-detected merge (no sport to inherit) before committing it.
@@ -418,14 +401,9 @@ private fun RangeBar(
     effectiveRange: WorkoutRange,
     rowCount: Int,
     fellBack: Boolean,
-    filterActive: Boolean,
     onSelect: (WorkoutRange) -> Unit,
-    onAdd: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Phone width can't fit the labelled Add button beside the 6-segment range pill without
-        // crushing/clipping one — stack them (button, then pill), matching the iPhone fix (#234/#339).
-        AddWorkoutButton(onAdd)
         SegmentedPillControl(
             items = WorkoutRange.entries,
             selection = range,
@@ -433,12 +411,10 @@ private fun RangeBar(
             onSelect = onSelect,
         )
         val unit = if (rowCount == 1) "session" else "sessions"
-        // #64: append "· filtered" when a sport/source/search filter narrows the list.
-        val suffix = if (filterActive) " · filtered" else ""
         val caption = if (fellBack) {
-            "$rowCount $unit · sparse, widened to ${effectiveRange.caption}$suffix"
+            "$rowCount $unit · sparse, widened to ${effectiveRange.caption}"
         } else {
-            "$rowCount $unit · ${effectiveRange.caption}$suffix"
+            "$rowCount $unit · ${effectiveRange.caption}"
         }
         Text(
             caption,
@@ -449,145 +425,41 @@ private fun RangeBar(
     }
 }
 
-// MARK: - Filters (#64)
-
-/** The origin classes offered in the Source filter, in a stable menu order (matches the row badges). */
-private val SOURCE_FILTER_OPTIONS = listOf(
-    WorkoutSource.WHOOP, WorkoutSource.APPLE, WorkoutSource.DETECTED,
-    WorkoutSource.MANUAL, WorkoutSource.LIFTING, WorkoutSource.ACTIVITY_FILE,
-)
-
-/** The Source-filter menu label for an origin class. */
-private fun sourceFilterLabel(c: WorkoutSource): String = when (c) {
-    WorkoutSource.WHOOP -> "Whoop"
-    WorkoutSource.APPLE -> "Apple"
-    WorkoutSource.DETECTED -> "Detected"
-    WorkoutSource.MANUAL -> "Manual"
-    WorkoutSource.LIFTING -> "Lifting"
-    WorkoutSource.ACTIVITY_FILE -> "File"
-}
-
 /**
- * #64: filter controls beside the range pill — a Sport menu, a Source menu, and a search field, with a
- * "×" clear chip that appears only when a filter is active. Mirrors the iOS WorkoutsView.filterBar; the
- * predicate is the pure [WorkoutFilter], these controls only drive its state.
+ * The floating "+" that opens the manual-add dialog — docked bottom-end over the scrolling content,
+ * shown only once there's a populated list to float over (the empty state has its own full [AddWorkoutButton]).
+ * Duplicates [AppRoot]'s private `QuickActionFab` recipe exactly (45dp circle, accent + top-lit gradient
+ * wash, soft shadow) rather than reusing it — that FAB is wired to Today's global quick-actions sheet via
+ * the outer Scaffold's floatingActionButton slot, while this one needs to open Workouts' own local dialog
+ * state, and is only shown on this screen.
  */
 @Composable
-private fun FilterBar(
-    filter: WorkoutFilter,
-    availableSports: List<String>,
-    onSport: (String?) -> Unit,
-    onSource: (WorkoutSource?) -> Unit,
-    onSearch: (String) -> Unit,
-    onClear: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FilterPillMenu(
-                title = filter.sport ?: "All sports",
-                active = filter.sport != null,
-                contentDescription = uiString(R.string.l10n_workouts_screen_filter_by_sport_bcbbcb3b),
-            ) { dismiss ->
-                DropdownMenuItem(
-                    text = { Text(uiString(R.string.l10n_workouts_screen_all_sports_dfad56f1), style = NoopType.body, color = Palette.textPrimary) },
-                    onClick = { onSport(null); dismiss() },
-                )
-                availableSports.forEach { s ->
-                    DropdownMenuItem(
-                        text = { Text(s, style = NoopType.body, color = Palette.textPrimary) },
-                        onClick = { onSport(s); dismiss() },
-                    )
-                }
-            }
-            FilterPillMenu(
-                title = filter.sourceClass?.let { sourceFilterLabel(it) } ?: "All sources",
-                active = filter.sourceClass != null,
-                contentDescription = uiString(R.string.l10n_workouts_screen_filter_by_source_db11bbb7),
-            ) { dismiss ->
-                DropdownMenuItem(
-                    text = { Text(uiString(R.string.l10n_workouts_screen_all_sources_c0e8e58c), style = NoopType.body, color = Palette.textPrimary) },
-                    onClick = { onSource(null); dismiss() },
-                )
-                SOURCE_FILTER_OPTIONS.forEach { opt ->
-                    DropdownMenuItem(
-                        text = { Text(sourceFilterLabel(opt), style = NoopType.body, color = Palette.textPrimary) },
-                        onClick = { onSource(opt); dismiss() },
-                    )
-                }
-            }
-            if (filter.isActive) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable(onClick = onClear)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .semantics { contentDescription = uiString(R.string.l10n_workouts_screen_clear_filters_41222671) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = null, tint = Palette.textSecondary, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(uiString(R.string.l10n_workouts_screen_clear_719ea396), style = NoopType.footnote, color = Palette.textSecondary)
-                }
-            }
-        }
-        OutlinedTextField(
-            value = filter.search,
-            onValueChange = onSearch,
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (filter.search.isNotEmpty()) {
-                    IconButton(onClick = { onSearch("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = uiString(R.string.l10n_workouts_screen_clear_search_67300d0f), tint = Palette.textTertiary, modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            placeholder = { Text(uiString(R.string.l10n_workouts_screen_search_sport_004b7928), style = NoopType.body, color = Palette.textTertiary) },
-            singleLine = true,
-            colors = workoutFieldColors(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-/** A pill-styled dropdown filter menu: the current selection as its label, Effort-tinted when active. */
-@Composable
-private fun FilterPillMenu(
-    title: String,
-    active: Boolean,
-    contentDescription: String,
-    items: @Composable (dismiss: () -> Unit) -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(if (active) Palette.effortColor.copy(alpha = 0.14f) else Palette.surfaceInset.copy(alpha = 0.6f))
-                .clickable { open = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-                .semantics { this.contentDescription = uiString(R.string.l10n_workouts_screen_contentdescription_title_5585ff52, contentDescription, title) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                title,
-                style = NoopType.footnote,
-                color = if (active) Palette.effortColor else Palette.textSecondary,
-                maxLines = 1,
+private fun WorkoutsAddFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .size(45.dp)
+            .shadow(6.dp, CircleShape, clip = false)
+            .clip(CircleShape)
+            .background(Palette.accent)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.22f),
+                        Color.Transparent,
+                        Color.Black.copy(alpha = 0.12f),
+                    ),
+                ),
             )
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = if (active) Palette.effortColor else Palette.textSecondary,
-                modifier = Modifier.size(14.dp),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
             )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            items { open = false }
-        }
+            .semantics { contentDescription = uiString(R.string.l10n_workouts_screen_add_workout_a196a2cc) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Add, contentDescription = null, tint = Palette.surfaceBase, modifier = Modifier.size(19.dp))
     }
 }
 
@@ -656,35 +528,37 @@ internal fun workoutStoryCards(
     windowRows: List<WorkoutRow>,
     groups: List<SportGroup>,
 ): List<WorkoutStoryCard> {
+    if (windowRows.isEmpty()) return emptyList()
     val days = resolved.days
-    if (days == null || windowRows.size < 2) return emptyList()
-    val last = allRows.maxOfOrNull { it.startTs } ?: return emptyList()
-    val prevCutoffEnd = last - days * 86_400L
-    val prevCutoffStart = last - 2L * days * 86_400L
-    val prevRows = allRows.filter { it.startTs in prevCutoffStart until prevCutoffEnd }
+    val last = allRows.maxOfOrNull { it.startTs }
+    // No bounded previous period to compare against for WorkoutRange.All (or no prior history) —
+    // prevRows stays empty, so the top-sport card below falls back to its plain factual sentence.
+    val prevRows = if (days != null && last != null) {
+        val prevCutoffEnd = last - days * 86_400L
+        val prevCutoffStart = last - 2L * days * 86_400L
+        allRows.filter { it.startTs in prevCutoffStart until prevCutoffEnd }
+    } else {
+        emptyList()
+    }
 
     val cards = mutableListOf<WorkoutStoryCard>()
-    // Candidate 1: top-sport trend — only a genuine up-move or a sport that's new this period;
-    // flat/down says nothing rather than manufacture a downbeat sentence.
+    // Candidate 1: top-sport — ALWAYS shown (the carousel should never be just the hero card alone).
+    // The sentence picks the celebratory "up from last period" phrasing when that trend genuinely
+    // clears the bar; flat, down, or period-less (WorkoutRange.All) all fall back to the same honest
+    // "is your top sport" statement rather than manufacturing a downbeat or false comparison.
     groups.firstOrNull()?.let { top ->
         val prevCount = prevRows.count { it.sport == top.sport }
         val name = WorkoutEditing.displaySport(top.sport)
         val sessionWord = if (top.count == 1) "session" else "sessions"
-        when {
-            prevRows.isEmpty() ->
-                cards += WorkoutStoryCard(
-                    "$name is your top sport this ${resolved.heroWord} — ${top.count} $sessionWord.",
-                    Palette.effortColor,
-                )
-            prevCount < top.count ->
-                cards += WorkoutStoryCard(
-                    "$name is your top sport — ${top.count} sessions, up from $prevCount last ${resolved.heroWord}.",
-                    Palette.effortColor,
-                )
+        val sentence = if (prevRows.isNotEmpty() && prevCount < top.count) {
+            "$name is your top sport — ${top.count} sessions, up from $prevCount last ${resolved.heroWord}."
+        } else {
+            "$name is your top sport this ${resolved.heroWord} — ${top.count} $sessionWord."
         }
+        cards += WorkoutStoryCard(sentence, Palette.effortColor)
     }
-    // Candidate 2: average-effort trend, only when both windows have enough signal and the swing
-    // clears a 10% floor.
+    // Candidate 2: average-effort trend — an optional second card, only when both windows have
+    // enough signal and the swing clears a 10% floor.
     val curStrains = windowRows.mapNotNull { it.strain }
     val prevStrains = prevRows.mapNotNull { it.strain }
     if (curStrains.size >= 2 && prevStrains.size >= 2) {
@@ -921,7 +795,7 @@ private fun SessionsSection(
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.weight(1f)) {
-                SectionHeader(title = uiString(R.string.l10n_workouts_screen_all_sessions_03bc4eb4), overline = "Log", trailing = "${rows.size} total")
+                SectionHeader(title = uiString(R.string.l10n_workouts_screen_all_sessions_03bc4eb4), trailing = "${rows.size} total")
             }
             if (anySelectable) SelectPill(selectionMode, onToggleSelectMode)
         }
@@ -941,8 +815,6 @@ private fun SessionsSection(
         if (selectionMode) SelectionToolbar(chosen, onMerge, onBulkDelete, onCancelSelect)
         NoopCard(padding = 0.dp) {
             Column {
-                SessionHeaderRow(selectionMode)
-                FullDivider()
                 visible.forEachIndexed { idx, row ->
                     SessionRow(
                         row = row,
@@ -1064,43 +936,6 @@ private fun ToolbarAction(label: String, icon: ImageVector, tint: Color, enabled
 private const val SESSIONS_PAGE_SIZE = 50
 
 @Composable
-private fun SessionHeaderRow(selectionMode: Boolean = false) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(34.dp)
-            .padding(horizontal = Metrics.cardPadding),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // #64: a leading spacer over the per-row selection glyph, so the columns stay aligned in select mode.
-        if (selectionMode) Spacer(Modifier.width(30.dp))
-        // Weights mirror SessionRow (#157: Date widened for the time range, taken from Sport).
-        ColHeader("Date", Modifier.weight(1.7f), TextAlign.Start)
-        ColHeader("Sport", Modifier.weight(1.3f), TextAlign.Start)
-        ColHeader("Dur", Modifier.weight(1f), TextAlign.End)
-        ColHeader("HR", Modifier.weight(1.1f), TextAlign.End)
-        ColHeader("Kcal", Modifier.weight(1f), TextAlign.End)
-        ColHeader("Src", Modifier.weight(1f), TextAlign.End)
-        // Trailing spacer column over the per-row overflow menu, so headers line up with the cells.
-        Spacer(Modifier.width(32.dp))
-    }
-}
-
-@Composable
-private fun ColHeader(text: String, modifier: Modifier, align: TextAlign) {
-    // Built from the overline style directly (not the Overline composable) so the
-    // numeric columns can right-align their headers over the right-aligned cells.
-    Text(
-        text = text.uppercase(),
-        style = NoopType.overline,
-        color = Palette.textSecondary,
-        textAlign = align,
-        maxLines = 1,
-        modifier = modifier,
-    )
-}
-
-@Composable
 private fun SessionRow(
     row: WorkoutRow,
     background: Color,
@@ -1115,6 +950,7 @@ private fun SessionRow(
 ) {
     // #64: only MANUAL / DETECTED rows are selectable — imported history is read-only.
     val selectable = WorkoutMerge.isMergeable(row)
+    val (srcLabel, srcTint) = row.sourceBadge
     val rowLabel = "${WorkoutEditing.displaySport(row.sport)}, ${dateLabel(row.startTs)}" +
         if (selectionMode) {
             when {
@@ -1138,8 +974,7 @@ private fun SessionRow(
             ) {
                 if (selectionMode) { if (selectable) onToggleRow(row) } else onClick(row)
             }
-            .height(56.dp)
-            .padding(start = Metrics.cardPadding)
+            .padding(horizontal = Metrics.cardPadding, vertical = 10.dp)
             .semantics { contentDescription = rowLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1162,21 +997,20 @@ private fun SessionRow(
             }
             Spacer(Modifier.width(8.dp))
         }
-        // Date + time range (#157). The 0.3f comes out of Sport: "HH:mm–HH:mm" clips at footnote
-        // size in the old 1.4f, while sport names already ellipsize gracefully.
-        Column(modifier = Modifier.weight(1.7f)) {
-            Text(dateLabel(row.startTs), style = NoopType.subhead, color = Palette.textPrimary, maxLines = 1)
-            Text(timeRangeLabel(row.startTs, row.endTs), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
+        // 2026-08 redesign: a source-tinted icon bubble replaces the dense Date/Sport/Dur/HR/Kcal/Src
+        // columns — reuses the same source tint as the badge below it (real semantic color, not an
+        // invented per-sport palette). Sport ("detected" reads as "Activity").
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(srcTint.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(sportIcon(row.sport), contentDescription = null, tint = srcTint, modifier = Modifier.size(17.dp))
         }
-        // Sport ("detected" reads as "Activity").
-        Row(modifier = Modifier.weight(1.3f), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                sportIcon(row.sport),
-                contentDescription = null,
-                tint = Palette.textSecondary,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(7.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 WorkoutEditing.displaySport(row.sport),
                 style = NoopType.subhead,
@@ -1184,25 +1018,27 @@ private fun SessionRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Text(
+                "${dateLabel(row.startTs)} · ${durationLabel(row.durationS)}",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Cell(durationLabel(row.durationS), Modifier.weight(1f))
-        Cell(
-            row.avgHr?.toString() ?: "–",
-            Modifier.weight(1.1f),
-            color = if (row.avgHr != null) Palette.metricRose else null,
-        )
-        Cell(
-            row.energyKcal?.let { grouped(it) } ?: "–",
-            Modifier.weight(1f),
-            color = if (row.energyKcal != null) Palette.metricAmber else null,
-        )
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            val (srcLabel, srcTint) = row.sourceBadge
-            SourceBadge(srcLabel, tint = srcTint)
+        Spacer(Modifier.width(8.dp))
+        // Strain leads (previously buried off-row) — same number family the hero card uses.
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                row.strain?.let { oneDecimal(it) } ?: "–",
+                style = NoopType.number(16f),
+                color = if (row.strain != null) srcTint else Palette.textTertiary,
+                maxLines = 1,
+            )
+            Text(srcLabel, style = NoopType.overline, color = srcTint.copy(alpha = 0.85f), maxLines = 1)
         }
-        // #64: hide the per-row ••• menu in selection mode (the toolbar owns the actions there); keep a
-        // 32dp spacer so the Src column stays aligned with the header.
-        if (selectionMode) Spacer(Modifier.width(32.dp)) else RowActionsMenu(row, onEdit, onRelabel, onDismiss, onDelete)
+        // #64: hide the per-row ••• menu in selection mode (the toolbar owns the actions there).
+        if (!selectionMode) RowActionsMenu(row, onEdit, onRelabel, onDismiss, onDelete)
     }
 }
 
@@ -1573,18 +1409,6 @@ private fun RowActionsMenu(
             }
         }
     }
-}
-
-@Composable
-private fun Cell(text: String, modifier: Modifier, color: Color? = null) {
-    Text(
-        text,
-        style = NoopType.number(13f, androidx.compose.ui.text.font.FontWeight.Normal),
-        color = color ?: if (text == "–") Palette.textTertiary else Palette.textPrimary,
-        textAlign = TextAlign.End,
-        maxLines = 1,
-        modifier = modifier,
-    )
 }
 
 // MARK: - Manual workout add / edit dialog

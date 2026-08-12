@@ -980,7 +980,7 @@
     <string name="l10n_workout_start_w_sport_name_uppercase_e59bc678">● %1$s</string>
     <string name="l10n_workouts_screen_activity_breakdown_214431d6">Aktivitätsaufschlüsselung</string>
     <string name="l10n_workouts_screen_add_workout_a196a2cc">Workout hinzufügen</string>
-    <string name="l10n_workouts_screen_all_sessions_03bc4eb4">Alle Sitzungen</string>
+    <string name="l10n_workouts_screen_all_sessions_03bc4eb4">Sitzungen</string>
     <string name="l10n_workouts_screen_all_sources_c0e8e58c">Alle Quellen</string>
     <string name="l10n_workouts_screen_all_sports_dfad56f1">Alle Sportarten</string>
     <string name="l10n_workouts_screen_avg_hr_is_shown_as_typed_2c8db249">Die Ø-HF wird wie eingegeben angezeigt. HF-Graph, Zonen und Anstrengung bleiben aus der aufgezeichneten Sitzung.</string>
