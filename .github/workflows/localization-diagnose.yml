@@ -1,4 +1,4 @@
-name: Localization Diagnose
+name: Localization Repair
 
 on:
   push:
@@ -7,14 +7,44 @@ on:
       - '.github/workflows/localization-diagnose.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  diagnose:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           ref: android-rebuild
-      - name: Compare English and German string keys
+      - name: Add missing German translations
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/res/values-de/strings.xml')
+          s = p.read_text()
+          additions = {
+              'nav_journal': 'Tagebuch',
+              'widget_hr_steps_name': 'NOOP Herzfrequenz &amp; Schritte',
+              'widget_hr_steps_description': 'Live-Herzfrequenz und heutige Schritte auf einen Blick.',
+          }
+          missing = [(k, v) for k, v in additions.items() if f'name="{k}"' not in s]
+          if missing:
+              block = ''.join(f'    <string name="{k}">{v}</string>\n' for k, v in missing)
+              s = s.replace('</resources>', block + '</resources>')
+              p.write_text(s)
+          PY
+          FILE='android/app/src/main/res/values-de/strings.xml'
+          if ! git diff --quiet -- "$FILE"; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add "$FILE"
+            git commit -m 'Add missing German translations'
+            git push origin HEAD:android-rebuild
+          fi
+
+      - name: Verify localization key parity
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
