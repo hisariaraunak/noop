@@ -1,0 +1,32 @@
+name: Localization Diagnose
+
+on:
+  push:
+    branches: [android-rebuild]
+    paths:
+      - '.github/workflows/localization-diagnose.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: android-rebuild
+      - name: Compare English and German string keys
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          base = Path('android/app/src/main/res')
+          en = {x.attrib['name']: (x.text or '') for x in ET.parse(base/'values/strings.xml').getroot().findall('string')}
+          de = {x.attrib['name']: (x.text or '') for x in ET.parse(base/'values-de/strings.xml').getroot().findall('string')}
+          missing = sorted(k for k in en if k != 'app_name' and k not in de)
+          blank = sorted(k for k,v in de.items() if not v.strip())
+          print('MISSING:', missing)
+          print('BLANK:', blank)
+          print('APP_NAME_IN_DE:', 'app_name' in de)
+          if missing or blank or 'app_name' in de:
+              raise SystemExit(1)
+          PY
