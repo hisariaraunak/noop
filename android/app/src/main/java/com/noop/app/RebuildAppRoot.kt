@@ -22,6 +22,7 @@ import androidx.navigation.compose.rememberNavController
 import com.noop.features.today.TodayRoute
 import com.noop.ui.AppRoot
 import com.noop.ui.AppViewModel
+import com.noop.ui.BackupSyncScreen
 import com.noop.ui.DataSourcesScreen
 import com.noop.ui.DevicesScreen
 import com.noop.ui.JournalScreen
@@ -42,6 +43,7 @@ private object RebuildRoute {
     const val DataSources = "you/data-sources"
     const val Notifications = "you/notifications"
     const val Settings = "you/settings"
+    const val Backup = "you/backup"
     const val MoreTools = "you/more-tools"
 }
 
@@ -92,7 +94,7 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
             ) {
                 composable(RebuildDestination.Today.route) { TodayRoute(viewModel) }
 
-                // Existing, mature feature bodies are reused while their visual layer is migrated to 2.0.
+                // Mature feature bodies are reused while their visual layer is migrated to 2.0.
                 composable(RebuildDestination.Journal.route) { JournalScreen(viewModel) }
                 composable(RebuildDestination.Trends.route) { WeekInReviewScreen(viewModel) }
 
@@ -116,9 +118,10 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                 composable(RebuildRoute.Settings) {
                     SettingsScreen(
                         vm = viewModel,
-                        onOpenBackupSync = { nav.navigate(RebuildRoute.MoreTools) },
+                        onOpenBackupSync = { nav.navigate(RebuildRoute.Backup) },
                     )
                 }
+                composable(RebuildRoute.Backup) { BackupSyncScreen() }
 
                 // Transitional escape hatch: preserves every specialist route while they migrate one by one.
                 composable(RebuildRoute.MoreTools) { AppRoot(viewModel = viewModel) }
