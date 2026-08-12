@@ -20,7 +20,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.noop.features.today.TodayRoute
+import com.noop.ui.AppRoot
 import com.noop.ui.AppViewModel
+import com.noop.ui.DataSourcesScreen
+import com.noop.ui.DevicesScreen
+import com.noop.ui.JournalScreen
+import com.noop.ui.NotificationsSettingsScreen
+import com.noop.ui.SettingsScreen
+import com.noop.ui.WeekInReviewScreen
 import com.noop.ui.designsystem.NoopDesignTheme
 
 private enum class RebuildDestination(val route: String, val label: String) {
@@ -30,7 +37,20 @@ private enum class RebuildDestination(val route: String, val label: String) {
     You("you_v2", "You"),
 }
 
-/** Android-first navigation shell for the rebuild. Legacy AppRoot remains intact during migration. */
+private object RebuildRoute {
+    const val Devices = "you/devices"
+    const val DataSources = "you/data-sources"
+    const val Notifications = "you/notifications"
+    const val Settings = "you/settings"
+    const val MoreTools = "you/more-tools"
+}
+
+/**
+ * Android-first root for NOOP 2.0.
+ *
+ * The four primary destinations use the new IA. During migration, proven specialist screens remain
+ * callable beneath You so the rebuild never trades visual progress for loss of functionality.
+ */
 @Composable
 fun RebuildAppRoot(viewModel: AppViewModel) {
     NoopDesignTheme {
@@ -49,7 +69,8 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                             RebuildDestination.You -> Icons.Filled.Person
                         }
                         NavigationBarItem(
-                            selected = currentRoute == destination.route,
+                            selected = currentRoute == destination.route ||
+                                (destination == RebuildDestination.You && currentRoute.startsWith("you/")),
                             onClick = {
                                 nav.navigate(destination.route) {
                                     launchSingleTop = true
@@ -67,29 +88,40 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
             NavHost(
                 navController = nav,
                 startDestination = RebuildDestination.Today.route,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
             ) {
                 composable(RebuildDestination.Today.route) { TodayRoute(viewModel) }
-                composable(RebuildDestination.Journal.route) {
-                    RebuildSectionScreen(
-                        title = "Journal",
-                        description = "Workouts, sleep sessions and daily notes will live here.",
-                    )
-                }
-                composable(RebuildDestination.Trends.route) {
-                    RebuildSectionScreen(
-                        title = "Trends",
-                        description = "Long-term metrics, baselines and correlations will live here.",
-                    )
-                }
+
+                // Existing, mature feature bodies are reused while their visual layer is migrated to 2.0.
+                composable(RebuildDestination.Journal.route) { JournalScreen(viewModel) }
+                composable(RebuildDestination.Trends.route) { WeekInReviewScreen(viewModel) }
+
                 composable(RebuildDestination.You.route) {
-                    RebuildSectionScreen(
-                        title = "You",
-                        description = "Devices, profile, data and settings will live here.",
+                    YouHubScreen(
+                        onDevices = { nav.navigate(RebuildRoute.Devices) },
+                        onDataSources = { nav.navigate(RebuildRoute.DataSources) },
+                        onNotifications = { nav.navigate(RebuildRoute.Notifications) },
+                        onSettings = { nav.navigate(RebuildRoute.Settings) },
+                        onMoreTools = { nav.navigate(RebuildRoute.MoreTools) },
                     )
                 }
+                composable(RebuildRoute.Devices) {
+                    DevicesScreen(
+                        viewModel = viewModel,
+                        onUseFileImport = { nav.navigate(RebuildRoute.DataSources) },
+                    )
+                }
+                composable(RebuildRoute.DataSources) { DataSourcesScreen(viewModel) }
+                composable(RebuildRoute.Notifications) { NotificationsSettingsScreen(viewModel) }
+                composable(RebuildRoute.Settings) {
+                    SettingsScreen(
+                        vm = viewModel,
+                        onOpenBackupSync = { nav.navigate(RebuildRoute.MoreTools) },
+                    )
+                }
+
+                // Transitional escape hatch: preserves every specialist route while they migrate one by one.
+                composable(RebuildRoute.MoreTools) { AppRoot(viewModel = viewModel) }
             }
         }
     }
