@@ -21,12 +21,14 @@ object TodayRecommendationEngine {
                 when {
                     it >= 5 -> add("HRV is $it% above your baseline")
                     it <= -10 -> add("HRV is ${-it}% below your baseline")
+                    else -> Unit
                 }
             }
             today.restingHrVsBaselineBpm?.let {
                 when {
                     it <= -3 -> add("Resting HR is ${-it} bpm below your baseline")
                     it >= 5 -> add("Resting HR is $it bpm above your baseline")
+                    else -> Unit
                 }
             }
             today.sleepMinutes?.let {
