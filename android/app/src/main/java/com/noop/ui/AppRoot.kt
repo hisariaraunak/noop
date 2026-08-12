@@ -110,9 +110,11 @@ import androidx.navigation.compose.rememberNavController
 // MARK: - Navigation model
 //
 // The macOS app's sidebar holds many sections; on Android (mirroring the iOS RootTabView) we surface
-// them through a unified floating "glass" bottom bar (Today · Trends · Sleep · More) for the everyday
-// screens, with a "More" sheet that lists the full grouped set — so every destination is one tap away
-// without a global hamburger/drawer. Destinations are grouped exactly as the sidebar groups them.
+// them through a unified floating "glass" bottom bar (Today · Trends · Workouts · More) for the
+// everyday screens, with a "More" sheet that lists the full grouped set — so every destination is one
+// tap away without a global hamburger/drawer. Destinations are grouped exactly as the sidebar groups
+// them. (2026-08: Workouts replaced Sleep as the fourth bar tab — Sleep stays one tap away from
+// Today's Rest ring instead, an unconditional entry point it already had.)
 // Routes whose screens belong to later waves point at a ComingSoon placeholder so the app compiles today.
 
 /** A single drawer destination: stable route, display title (localized via [titleRes]), sidebar icon. */
@@ -210,9 +212,10 @@ private data class DrawerGroup(
     val defaultExpanded: Boolean,
 )
 
-// Mirrors the iOS RootTabView `moreTab` grouping + order one-for-one. Today / Trends / Sleep are NOT
-// listed (they're bottom-bar tabs, exactly as on iOS). Android-only screens (Vital Signs, Wake Window,
-// Notifications, Devices) are slotted into the matching iOS group.
+// Mirrors the iOS RootTabView `moreTab` grouping + order one-for-one. Today / Trends / Workouts are
+// NOT listed (they're bottom-bar tabs, exactly as on iOS — Workouts replaced Sleep as the fourth tab,
+// 2026-08). Android-only screens (Vital Signs, Wake Window, Notifications, Devices) are slotted into
+// the matching iOS group.
 private val drawerGroups: List<DrawerGroup> = listOf(
     // IA phase 4 (2026-08): InsightsHub/Intelligence/Explore/Compare dropped — reached only via the
     // Insights hub's own cards now, not the drawer.
@@ -221,14 +224,13 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     ), defaultExpanded = true),
     // IA phase 5 (2026-08): Health/Stress/LabBook dropped — each has an UNCONDITIONAL entry point
     // elsewhere (Today's Health/Stress cards; Health & Wellness's own Records & Sources section links Lab
-    // Book). Workouts was dropped too in that pass but restored here (2026-08 follow-up): its Today card
-    // (TodayWorkoutsSection) returns nothing at all when there's no recent workout — the exact same
-    // conditional-entry problem that kept Live in this list, just missed the first time. What's left has
-    // no standing home outside this drawer: Live only opens from Today conditionally (an active workout in
-    // progress), Workouts' Today card is the same story, Breathe is a link-out button on the Stress screen
-    // rather than a persistent card, Intervals/Rhythm have no other entry point at all.
+    // Book). Workouts left too (2026-08 follow-up) once it became a bottom-bar tab. Sleep never enters —
+    // it's reached unconditionally from Today's Rest ring, the same standing-entry-point reasoning that
+    // keeps Health/Stress/LabBook out. What's left has no standing home outside this drawer: Live only
+    // opens from Today conditionally (an active workout in progress), Breathe is a link-out button on the
+    // Stress screen rather than a persistent card, Intervals/Rhythm have no other entry point at all.
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Breathe, Destination.Intervals, Destination.Rhythm,
+        Destination.Live, Destination.Breathe, Destination.Intervals, Destination.Rhythm,
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
@@ -776,10 +778,19 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
 // active = gold accent, inactive = textSecondary. All routing is unchanged: the four tabs switch the
 // same destinations.
 
-/** A single bottom-bar nav slot: the destination it switches to, plus the bar-specific icon/label. */
-private data class BarTab(val dest: Destination, val icon: ImageVector, @StringRes val labelRes: Int)
+/** A single bottom-bar nav slot: the destination it switches to, plus the bar-specific icon/label.
+ *  [family] is every destination that should keep this slot lit — defaults to just [dest], but a tab
+ *  whose destination has its own drill-in screens (e.g. Workouts → a workout's detail, or its analysis
+ *  screen) lists those too, so opening one still reads as "you're in Workouts", not "you're in More". */
+private data class BarTab(
+    val dest: Destination,
+    val icon: ImageVector,
+    @StringRes val labelRes: Int,
+    val family: Set<Destination> = setOf(dest),
+)
 
-/** The nav slots in iOS order: Today · Trends · Sleep · More.
+/** The nav slots in iOS order: Today · Trends · Workouts · More (Workouts replaced Sleep, 2026-08 —
+ *  Sleep is one tap away from Today's Rest ring instead).
  *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
 private val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
@@ -788,7 +799,10 @@ private val barLeadingTabs = listOf(
     BarTab(Destination.Trends, Icons.Filled.CalendarMonth, R.string.nav_trends),
 )
 private val barTrailingTabs = listOf(
-    BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
+    BarTab(
+        Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts,
+        family = setOf(Destination.Workouts, Destination.WorkoutDetail, Destination.WorkoutsAnalysis),
+    ),
 )
 
 /**
@@ -844,6 +858,9 @@ private fun GlassBottomBar(
     onTabSelected: (Destination) -> Unit,
 ) {
     val barShape = RoundedCornerShape(50)
+    // Every destination any bar tab (or its drill-in family) covers — used both to light up the right
+    // tab and to know when "More" should light up instead (anything NOT in this set).
+    val barDestinations = (barLeadingTabs + barTrailingTabs).flatMap { it.family }.toSet()
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -880,7 +897,7 @@ private fun GlassBottomBar(
                     BarSlot(
                         icon = tab.icon,
                         label = stringResource(tab.labelRes),
-                        active = current == tab.dest,
+                        active = current in tab.family,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(tab.dest) },
                     )
@@ -889,7 +906,7 @@ private fun GlassBottomBar(
                     BarSlot(
                         icon = tab.icon,
                         label = stringResource(tab.labelRes),
-                        active = current == tab.dest,
+                        active = current in tab.family,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(tab.dest) },
                     )
@@ -898,10 +915,9 @@ private fun GlassBottomBar(
                     icon = Icons.Filled.MoreHoriz,
                     label = stringResource(R.string.nav_more),
                     // Selected on the More page itself, and also kept lit whenever the current screen is
-                    // one reached THROUGH More (i.e. not one of the bar's own three tabs) — so drilling
+                    // one reached THROUGH More (i.e. outside every bar tab's own family) — so drilling
                     // into any grouped destination still reads as "you're in More", never "nowhere".
-                    active = current != Destination.Today && current != Destination.Trends &&
-                        current != Destination.Sleep,
+                    active = current !in barDestinations,
                     modifier = Modifier.weight(1f),
                     onClick = { onTabSelected(Destination.More) },
                 )
