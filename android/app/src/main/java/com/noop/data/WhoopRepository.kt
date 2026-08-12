@@ -1020,9 +1020,10 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun stepActivityClassLatestUnion(activeDeviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT):
         Int? = latestActivityClass(importedSourceIds(activeDeviceId).map { dao.stepSamples(it, from, to, limit) })
 
-    /** Delete a computed source's [sport] workouts in [from, to] (makes re-detection idempotent). (#78) */
-    suspend fun deleteComputedWorkouts(deviceId: String, sport: String, from: Long, to: Long) =
-        dao.deleteWorkoutsBySport(deviceId, sport, from, to)
+    /** Delete a computed source's workouts (any sport) in [from, to] (makes re-detection idempotent).
+     *  Not sport-scoped — see [WhoopDao.deleteWorkoutsByDevice]. (#78) */
+    suspend fun deleteComputedWorkouts(deviceId: String, from: Long, to: Long) =
+        dao.deleteWorkoutsByDevice(deviceId, from, to)
 
     // MARK: - Workout editing (manual add/edit · relabel · dismiss · delete) (#107)
     //
@@ -1086,7 +1087,9 @@ class WhoopRepository(private val dao: WhoopDao) {
         if (trimmed.isEmpty()) return
         val manual = row.copy(deviceId = strapDeviceId, sport = trimmed, source = "manual")
         dao.upsertWorkouts(listOf(manual))
-        dao.deleteWorkoutsBySport(computedDeviceId(strapDeviceId), "detected", row.startTs, row.startTs)
+        // Device-scoped, not sport-scoped: the detected original may already carry a classified sport
+        // ("Walking" etc.), not the literal "detected" — see [deleteWorkoutsByDevice].
+        dao.deleteWorkoutsByDevice(computedDeviceId(strapDeviceId), row.startTs, row.startTs)
     }
 
     /**

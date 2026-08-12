@@ -144,6 +144,9 @@ data class ExerciseSession(
     val hrmaxSource: String,
     val caloriesKcal: Double?,
     val caloriesKJ: Double?,
+    /** [WorkoutTypeClassifier]'s catalogue-name guess ("Walking", "Running", …) when confident enough to
+     *  name one; null when it couldn't (kept as the generic "detected" sport downstream). Advisory only. */
+    val classifiedSport: String? = null,
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -530,7 +530,7 @@ object AnalyticsEngine {
         // afternoon/evening workout is caught on its own day rather than lagging until a later pass
         // re-reads it through the next night window (which ends at ≈ noon). Falls back to the night
         // window for pure-function callers/tests.
-        val workouts = WorkoutDetector.detect(
+        val rawWorkouts = WorkoutDetector.detect(
             hr = dayHr ?: hr,
             gravity = dayGravity ?: gravity,
             restingHR = restingHRDaily?.toDouble(),
@@ -539,6 +539,23 @@ object AnalyticsEngine {
             profile = profile,
             sensitivity = workoutSensitivity,
         )
+        // Tag each detected bout with WorkoutTypeClassifier's catalogue-name guess ("Walking" etc.) when
+        // it's confident enough to name one, over the SAME full-day streams the detector itself just
+        // used to find the bout — so a brisk walk shows up honestly instead of hiding behind a generic
+        // "detected"/Activity label. Advisory: a bout the classifier can't confidently place keeps
+        // classifiedSport null and falls back to that generic label downstream, unchanged.
+        val workouts = rawWorkouts.map { session ->
+            val features = WorkoutTypeFeatureExtractor.extract(
+                hr = dayHr ?: hr,
+                gravity = dayGravity ?: gravity,
+                steps = daySteps ?: steps,
+                start = session.start,
+                end = session.end,
+                caloriesKcal = session.caloriesKcal,
+            )
+            val cls = features?.let { WorkoutTypeClassifier.classify(it).predictedClass }
+            session.copy(classifiedSport = cls?.let { WorkoutTypeClassifier.catalogSportName(it) })
+        }
 
         // ── Steps (APPROXIMATE) ───────────────────────────────────────────────
         // step_motion_counter@57 is a CUMULATIVE u16 running counter (it climbs while you move, holds

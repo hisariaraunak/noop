@@ -967,7 +967,8 @@ object IntelligenceEngine {
             }
             // Persist the detected workouts the pipeline already computes (previously discarded).
             // Skip any bout overlapping a real imported/manual workout so import+wear users don't
-            // double-count. sport="detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
+            // double-count. sport is the WorkoutTypeClassifier's guess when confident (e.g. "Walking"),
+            // else the generic "detected" fallback; energyKcal is the APPROXIMATE Keytel/BMR total.
             for (s in res.workouts) {
                 val durMin = maxOf(0L, (s.end - s.start) / 60L).toInt()
                 val avgBpm = s.avgHR.toInt()
@@ -997,12 +998,16 @@ object IntelligenceEngine {
                     )
                     continue
                 }
+                // AnalyticsEngine already ran the (advisory) WorkoutTypeClassifier on this bout —
+                // s.classifiedSport is its catalogue-name guess ("Walking" etc.) when confident enough,
+                // so a brisk walk shows up honestly instead of a generic "Activity" that hid what
+                // actually happened; null falls back to "detected" (→ "Activity") exactly as before.
                 workoutRows.add(
                     WorkoutRow(
                         deviceId = computedId,
                         startTs = s.start,
                         endTs = s.end,
-                        sport = "detected",
+                        sport = s.classifiedSport ?: "detected",
                         source = computedId,
                         durationS = s.durationS,
                         energyKcal = s.caloriesKcal,
@@ -1366,7 +1371,7 @@ object IntelligenceEngine {
         // Make re-detection idempotent across runs: clear the prior computed detected workouts
         // in the scored window (a bout's startTs can drift as more HR arrives, which would
         // otherwise orphan stale rows under the (deviceId,startTs,sport) key), then re-insert.
-        repo.deleteComputedWorkouts(computedId, "detected", windowStart, nowSeconds)
+        repo.deleteComputedWorkouts(computedId, windowStart, nowSeconds)
         if (workoutRows.isNotEmpty()) repo.upsertWorkouts(workoutRows)
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero

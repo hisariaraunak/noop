@@ -192,6 +192,22 @@ object WorkoutTypeClassifier {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
+     * Maps a confident [CoarseWorkoutClass] to this app's own sport-catalogue name ([WorkoutSport.all] /
+     * [com.noop.ingest.ExerciseTypes.NAMES]) so a caller that tags a detected bout with this name gets
+     * the SAME icon/filter treatment a real logged session of that sport would, with no UI-layer changes.
+     * [CoarseWorkoutClass.OTHER] (this classifier's own "not confident enough to guess" verdict) maps to
+     * null — callers should keep their existing generic fallback in that case.
+     */
+    fun catalogSportName(cls: CoarseWorkoutClass): String? = when (cls) {
+        CoarseWorkoutClass.WALK -> "Walking"
+        CoarseWorkoutClass.RUN -> "Running"
+        CoarseWorkoutClass.STRENGTH -> "Strength"
+        CoarseWorkoutClass.CYCLE -> "Cycling"
+        CoarseWorkoutClass.SKI -> "Skiing"
+        CoarseWorkoutClass.OTHER -> null
+    }
+
+    /**
      * Score [features] against every candidate class and return the winner (or OTHER when nothing
      * clears [minPlausibleScore]/[minMargin]) plus a confidence that reflects both the margin and how
      * complete the inputs were.

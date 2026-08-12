@@ -735,6 +735,15 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("DELETE FROM workout WHERE deviceId = :deviceId AND sport = :sport AND startTs >= :from AND startTs <= :to")
     suspend fun deleteWorkoutsBySport(deviceId: String, sport: String, from: Long, to: Long)
 
+    /** Delete ALL of a computed source's workouts (any sport) whose startTs is in [from, to] — same
+     *  idempotent-re-derivation purpose as [deleteWorkoutsBySport], but not sport-filtered: a detected
+     *  bout's sport is now the WorkoutTypeClassifier's guess ("Walking"/"Running"/…/"detected" when
+     *  unsure), not always the literal "detected", so a wipe keyed to that one literal would leave a
+     *  classified bout behind to duplicate on the next pass. [deviceId] (the "<strap>-noop" computed
+     *  source) is exclusively auto-detected rows, so scoping by device + time alone is sufficient. */
+    @Query("DELETE FROM workout WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to")
+    suspend fun deleteWorkoutsByDevice(deviceId: String, from: Long, to: Long)
+
     /** Delete ONE workout by its full natural key (deviceId, startTs, sport). Used by the Workouts
      *  screen to remove a single manual / re-labelled session. (#107) */
     @Query("DELETE FROM workout WHERE deviceId = :deviceId AND startTs = :startTs AND sport = :sport")
