@@ -49,6 +49,21 @@ jobs:
             git push origin HEAD:android-rebuild
           fi
 
+      - name: Verify German localization key parity
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          base = Path('android/app/src/main/res')
+          en = {x.attrib['name']: (x.text or '') for x in ET.parse(base/'values/strings.xml').getroot().findall('string')}
+          de = {x.attrib['name']: (x.text or '') for x in ET.parse(base/'values-de/strings.xml').getroot().findall('string')}
+          missing = sorted(k for k in en if k != 'app_name' and k not in de)
+          blank = sorted(k for k,v in de.items() if not v.strip())
+          assert not missing, f'Missing German translations: {missing}'
+          assert not blank, f'Blank German translations: {blank}'
+          assert 'app_name' not in de, 'app_name must remain brand-only'
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
