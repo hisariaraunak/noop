@@ -1,0 +1,77 @@
+name: Android Rebuild Verify
+
+on:
+  push:
+    branches: [android-rebuild]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-rebuild-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-rebuild-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cutover-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: android-rebuild
+
+      - name: Cut over post-onboarding root
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='android/app/src/main/java/com/noop/ui/MainActivity.kt'
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/java/com/noop/ui/MainActivity.kt')
+          s = p.read_text()
+          old = '    AppRoot(viewModel = appViewModel)'
+          new = '    com.noop.app.RebuildAppRoot(viewModel = appViewModel)'
+          if new not in s:
+              if old not in s:
+                  raise SystemExit('Expected AppRoot cutover line not found')
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+          PY
+          if ! git diff --quiet -- "$FILE"; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add "$FILE"
+            git commit -m 'Cut over Android launch root to rebuild shell'
+            git push origin HEAD:android-rebuild
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v5
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleFullDebug
+
+      - name: Run unit tests
+        working-directory: android
+        run: ./gradlew testFullDebugUnitTest
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: noop-android-rebuild-debug
+          path: android/app/build/outputs/apk/full/debug/*.apk
+          if-no-files-found: error
