@@ -27,7 +27,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.noop.features.today.TodayRoute
+import com.noop.ui.AddDeviceWizard
 import com.noop.ui.AppViewModel
+import com.noop.ui.BackupSyncScreen
+import com.noop.ui.DataSourcesScreen
+import com.noop.ui.NotificationsSettingsScreen
+import com.noop.ui.SettingsScreen
 import com.noop.ui.designsystem.NoopDesignTheme
 
 private enum class RebuildDestination(val route: String, val label: String) {
@@ -41,9 +46,14 @@ private object RebuildRoute {
     const val JournalEditor = "journal/editor"
     const val Workouts = "you/workouts"
     const val Devices = "you/devices"
+    const val AddDevice = "you/devices/add"
     const val DataSources = "you/data-sources"
+    const val FileImports = "you/data-sources/imports"
     const val Notifications = "you/notifications"
+    const val NotificationsAdvanced = "you/notifications/advanced"
     const val Settings = "you/settings"
+    const val SettingsAdvanced = "you/settings/advanced"
+    const val Backup = "you/settings/backup"
 }
 
 @Composable
@@ -88,12 +98,7 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
         ) { innerPadding ->
             NavHost(navController = nav, startDestination = RebuildDestination.Today.route, modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 composable(RebuildDestination.Today.route) {
-                    TodayRoute(
-                        viewModel,
-                        onRecovery = { nav.navigate(RebuildRoute.Recovery) },
-                        onSleep = { nav.navigate(RebuildRoute.Sleep) },
-                        onStrain = { nav.navigate(RebuildRoute.Strain) },
-                    )
+                    TodayRoute(viewModel, onRecovery = { nav.navigate(RebuildRoute.Recovery) }, onSleep = { nav.navigate(RebuildRoute.Sleep) }, onStrain = { nav.navigate(RebuildRoute.Strain) })
                 }
                 composable(RebuildDestination.Journal.route) { JournalOverviewScreen(viewModel, onOpenJournal = { nav.navigate(RebuildRoute.JournalEditor) }) }
                 composable(RebuildDestination.Trends.route) { TrendsOverviewScreen(viewModel) }
@@ -111,11 +116,27 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                 composable(RebuildRoute.Strain) { HealthDetailScreen(viewModel, HealthMetric.Strain) }
                 composable(RebuildRoute.JournalEditor) { JournalEditorV2(viewModel) }
                 composable(RebuildRoute.Workouts) { WorkoutsV2Screen(viewModel) }
-                composable(RebuildRoute.Devices) { DevicesV2Screen(viewModel) }
-                composable(RebuildRoute.DataSources) { DataSourcesV2Screen(viewModel, onDevices = { nav.navigate(RebuildRoute.Devices) }) }
-                composable(RebuildRoute.Notifications) { NotificationsV2Screen() }
+                composable(RebuildRoute.Devices) { DevicesV2Screen(viewModel, onAddDevice = { nav.navigate(RebuildRoute.AddDevice) }) }
+                composable(RebuildRoute.AddDevice) {
+                    AddDeviceWizard(viewModel = viewModel, onClose = { nav.popBackStack() }, onUseFileImport = { nav.navigate(RebuildRoute.FileImports) })
+                }
+                composable(RebuildRoute.DataSources) {
+                    DataSourcesV2Screen(viewModel, onDevices = { nav.navigate(RebuildRoute.Devices) }, onFileImports = { nav.navigate(RebuildRoute.FileImports) })
+                }
+                composable(RebuildRoute.FileImports) { DataSourcesScreen(viewModel) }
+                composable(RebuildRoute.Notifications) { NotificationsV2Screen(onAdvanced = { nav.navigate(RebuildRoute.NotificationsAdvanced) }) }
+                composable(RebuildRoute.NotificationsAdvanced) { NotificationsSettingsScreen(viewModel) }
                 composable(RebuildRoute.Settings) {
-                    SettingsV2Screen(themeMode = themeMode) { mode -> themeMode = mode; saveThemeMode(context, mode) }
+                    SettingsV2Screen(
+                        themeMode = themeMode,
+                        onThemeMode = { mode -> themeMode = mode; saveThemeMode(context, mode) },
+                        onBackup = { nav.navigate(RebuildRoute.Backup) },
+                        onAdvanced = { nav.navigate(RebuildRoute.SettingsAdvanced) },
+                    )
+                }
+                composable(RebuildRoute.Backup) { BackupSyncScreen() }
+                composable(RebuildRoute.SettingsAdvanced) {
+                    SettingsScreen(vm = viewModel, onOpenBackupSync = { nav.navigate(RebuildRoute.Backup) })
                 }
             }
         }
