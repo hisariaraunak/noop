@@ -97,30 +97,96 @@ private fun InsightCard(insight: CorrelationInsight) {
 }
 
 private fun correlationInsights(days: List<DailyMetric>): List<CorrelationInsight> {
-    fun build(title: String, a: (DailyMetric) -> Double?, b: (DailyMetric) -> Double?, positiveCopy: String, negativeCopy: String): CorrelationInsight? {
+    fun build(
+        title: String,
+        a: (DailyMetric) -> Double?,
+        b: (DailyMetric) -> Double?,
+        positiveCopy: String,
+        negativeCopy: String,
+    ): CorrelationInsight? {
         val pairs = days.mapNotNull { d ->
             val x = a(d)?.takeIf(Double::isFinite)
             val y = b(d)?.takeIf(Double::isFinite)
             if (x != null && y != null) x to y else null
         }
-        if (pairs.size < 7) return null
-        val r = pearson(pairs) ?: return null
-        if (kotlin.math.abs(r) < 0.2) return null
-        return CorrelationInsight(title, if (r >= 0) positiveCopy else negativeCopy, r, pairs.size)
+        return insightFromPairs(title, pairs, positiveCopy, negativeCopy)
     }
+
+    fun buildNextDay(
+        title: String,
+        today: (DailyMetric) -> Double?,
+        nextDay: (DailyMetric) -> Double?,
+        positiveCopy: String,
+        negativeCopy: String,
+    ): CorrelationInsight? {
+        // Pair row i's exposure with row i+1's outcome. Do not label a same-day correlation as
+        // next-day: that changes the interpretation of load/recovery substantially.
+        val pairs = days.zipWithNext().mapNotNull { (current, following) ->
+            val x = today(current)?.takeIf(Double::isFinite)
+            val y = nextDay(following)?.takeIf(Double::isFinite)
+            if (x != null && y != null) x to y else null
+        }
+        return insightFromPairs(title, pairs, positiveCopy, negativeCopy)
+    }
+
     return listOfNotNull(
-        build("Sleep ↔ recovery", { it.totalSleepMin }, { it.recovery }, "Longer sleep has tended to move with higher recovery.", "Longer sleep has not translated into higher recovery in this window."),
-        build("HRV ↔ recovery", { it.avgHrv }, { it.recovery }, "Higher HRV has tended to move with higher recovery.", "HRV and recovery have moved in opposite directions recently."),
-        build("Resting HR ↔ recovery", { it.restingHr?.toDouble() }, { it.recovery }, "Higher resting HR has moved with higher recovery in this sample.", "Lower resting HR has tended to move with higher recovery."),
-        build("Strain ↔ next-day recovery", { it.strain }, { it.recovery }, "Higher load has coincided with higher recovery in this sample.", "Higher load has tended to coincide with lower recovery."),
+        build(
+            "Sleep ↔ recovery",
+            { it.totalSleepMin },
+            { it.recovery },
+            "Longer sleep has tended to move with higher recovery.",
+            "Longer sleep has not translated into higher recovery in this window.",
+        ),
+        build(
+            "HRV ↔ recovery",
+            { it.avgHrv },
+            { it.recovery },
+            "Higher HRV has tended to move with higher recovery.",
+            "HRV and recovery have moved in opposite directions recently.",
+        ),
+        build(
+            "Resting HR ↔ recovery",
+            { it.restingHr?.toDouble() },
+            { it.recovery },
+            "Higher resting HR has moved with higher recovery in this sample.",
+            "Lower resting HR has tended to move with higher recovery.",
+        ),
+        buildNextDay(
+            "Strain ↔ next-day recovery",
+            { it.strain },
+            { it.recovery },
+            "Higher load has tended to precede higher next-day recovery in this sample.",
+            "Higher load has tended to precede lower next-day recovery.",
+        ),
     ).sortedByDescending { kotlin.math.abs(it.r) }
+}
+
+private fun insightFromPairs(
+    title: String,
+    pairs: List<Pair<Double, Double>>,
+    positiveCopy: String,
+    negativeCopy: String,
+): CorrelationInsight? {
+    if (pairs.size < 7) return null
+    val r = pearson(pairs) ?: return null
+    if (kotlin.math.abs(r) < 0.2) return null
+    return CorrelationInsight(title, if (r >= 0) positiveCopy else negativeCopy, r, pairs.size)
 }
 
 private fun pearson(pairs: List<Pair<Double, Double>>): Double? {
     if (pairs.size < 2) return null
-    val mx = pairs.map { it.first }.average(); val my = pairs.map { it.second }.average()
-    var num = 0.0; var dx = 0.0; var dy = 0.0
-    for ((x, y) in pairs) { val a = x - mx; val b = y - my; num += a * b; dx += a * a; dy += b * b }
+    val mx = pairs.map { it.first }.average()
+    val my = pairs.map { it.second }.average()
+    var num = 0.0
+    var dx = 0.0
+    var dy = 0.0
+    for ((x, y) in pairs) {
+        val a = x - mx
+        val b = y - my
+        num += a * b
+        dx += a * a
+        dy += b * b
+    }
     val denom = sqrt(dx * dy)
     return if (denom > 0 && denom.isFinite()) (num / denom).takeIf(Double::isFinite) else null
 }
@@ -151,7 +217,9 @@ private fun CompactTrend(title: String, value: String, values: List<Float>, modi
 private fun trendCopy(values: List<Double>, higherIsBetter: Boolean): String {
     val finite = values.filter(Double::isFinite)
     if (finite.size < 4) return "More days are needed before calling a direction."
-    val midpoint = finite.size / 2; val older = finite.take(midpoint).average(); val newer = finite.drop(midpoint).average()
+    val midpoint = finite.size / 2
+    val older = finite.take(midpoint).average()
+    val newer = finite.drop(midpoint).average()
     if (!older.isFinite() || !newer.isFinite() || older == 0.0) return "Your recent pattern is still forming."
     val pct = ((newer / older) - 1.0) * 100.0
     if (!pct.isFinite() || kotlin.math.abs(pct) < 3.0) return "Broadly stable across the recent window."
@@ -159,4 +227,7 @@ private fun trendCopy(values: List<Double>, higherIsBetter: Boolean): String {
     return "Recent average is ${if (pct > 0) "up" else "down"} ${kotlin.math.abs(pct).roundToInt()}%${if (favorable) "." else "; worth watching."}"
 }
 
-private fun formatMinutes(minutes: Double): String { val t = minutes.takeIf(Double::isFinite)?.roundToInt()?.coerceAtLeast(0) ?: return "—"; return "${t / 60}h ${t % 60}m" }
+private fun formatMinutes(minutes: Double): String {
+    val t = minutes.takeIf(Double::isFinite)?.roundToInt()?.coerceAtLeast(0) ?: return "—"
+    return "${t / 60}h ${t % 60}m"
+}
