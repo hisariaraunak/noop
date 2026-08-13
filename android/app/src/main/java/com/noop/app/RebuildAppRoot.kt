@@ -8,8 +8,10 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +41,8 @@ private enum class RebuildDestination(val route: String, val label: String) {
 }
 
 private object RebuildRoute {
+    const val JournalDetail = "journal/detail"
+    const val WeekDetail = "trends/week"
     const val Devices = "you/devices"
     const val DataSources = "you/data-sources"
     const val Notifications = "you/notifications"
@@ -47,42 +51,50 @@ private object RebuildRoute {
     const val MoreTools = "you/more-tools"
 }
 
-/**
- * Android-first root for NOOP 2.0.
- *
- * The four primary destinations use the new IA. During migration, proven specialist screens remain
- * callable beneath You so the rebuild never trades visual progress for loss of functionality.
- */
+/** Android-first root for the NOOP 2.0 information architecture. */
 @Composable
 fun RebuildAppRoot(viewModel: AppViewModel) {
     NoopDesignTheme {
         val nav = rememberNavController()
         val backStack by nav.currentBackStackEntryAsState()
         val currentRoute = backStack?.destination?.route ?: RebuildDestination.Today.route
+        val isPrimary = RebuildDestination.entries.any { it.route == currentRoute }
 
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                NavigationBar {
-                    RebuildDestination.entries.forEach { destination ->
-                        val icon = when (destination) {
-                            RebuildDestination.Today -> Icons.Filled.Home
-                            RebuildDestination.Journal -> Icons.Filled.Edit
-                            RebuildDestination.Trends -> Icons.Filled.Timeline
-                            RebuildDestination.You -> Icons.Filled.Person
+                if (isPrimary) {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = androidx.compose.ui.unit.Dp.Unspecified,
+                    ) {
+                        RebuildDestination.entries.forEach { destination ->
+                            val icon = when (destination) {
+                                RebuildDestination.Today -> Icons.Filled.Home
+                                RebuildDestination.Journal -> Icons.Filled.Edit
+                                RebuildDestination.Trends -> Icons.Filled.Timeline
+                                RebuildDestination.You -> Icons.Filled.Person
+                            }
+                            NavigationBarItem(
+                                selected = currentRoute == destination.route,
+                                onClick = {
+                                    nav.navigate(destination.route) {
+                                        launchSingleTop = true
+                                        restoreState = true
+                                        popUpTo(RebuildDestination.Today.route) { saveState = true }
+                                    }
+                                },
+                                icon = { Icon(icon, contentDescription = destination.label) },
+                                label = { Text(destination.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
                         }
-                        NavigationBarItem(
-                            selected = currentRoute == destination.route ||
-                                (destination == RebuildDestination.You && currentRoute.startsWith("you/")),
-                            onClick = {
-                                nav.navigate(destination.route) {
-                                    launchSingleTop = true
-                                    restoreState = true
-                                    popUpTo(RebuildDestination.Today.route) { saveState = true }
-                                }
-                            },
-                            icon = { Icon(icon, contentDescription = destination.label) },
-                            label = { Text(destination.label) },
-                        )
                     }
                 }
             },
@@ -93,11 +105,18 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
             ) {
                 composable(RebuildDestination.Today.route) { TodayRoute(viewModel) }
-
-                // Mature feature bodies are reused while their visual layer is migrated to 2.0.
-                composable(RebuildDestination.Journal.route) { JournalScreen(viewModel) }
-                composable(RebuildDestination.Trends.route) { WeekInReviewScreen(viewModel) }
-
+                composable(RebuildDestination.Journal.route) {
+                    JournalOverviewScreen(
+                        viewModel = viewModel,
+                        onOpenJournal = { nav.navigate(RebuildRoute.JournalDetail) },
+                    )
+                }
+                composable(RebuildDestination.Trends.route) {
+                    TrendsOverviewScreen(
+                        viewModel = viewModel,
+                        onOpenWeekReview = { nav.navigate(RebuildRoute.WeekDetail) },
+                    )
+                }
                 composable(RebuildDestination.You.route) {
                     YouHubScreen(
                         onDevices = { nav.navigate(RebuildRoute.Devices) },
@@ -107,6 +126,10 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                         onMoreTools = { nav.navigate(RebuildRoute.MoreTools) },
                     )
                 }
+
+                // Mature specialist screens sit one level below the coherent primary experience.
+                composable(RebuildRoute.JournalDetail) { JournalScreen(viewModel) }
+                composable(RebuildRoute.WeekDetail) { WeekInReviewScreen(viewModel) }
                 composable(RebuildRoute.Devices) {
                     DevicesScreen(
                         viewModel = viewModel,
@@ -122,8 +145,6 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                     )
                 }
                 composable(RebuildRoute.Backup) { BackupSyncScreen() }
-
-                // Transitional escape hatch: preserves every specialist route while they migrate one by one.
                 composable(RebuildRoute.MoreTools) { AppRoot(viewModel = viewModel) }
             }
         }
