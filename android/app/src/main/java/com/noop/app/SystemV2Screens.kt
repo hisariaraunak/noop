@@ -45,10 +45,17 @@ enum class RebuildThemeMode { System, Light, Dark }
 private const val REBUILD_PREFS = "noop_rebuild_prefs"
 private const val THEME_KEY = "theme_mode"
 private const val METRIC_KEY = "metric_units"
+
 internal fun loadThemeMode(ctx: Context): RebuildThemeMode = runCatching {
-    RebuildThemeMode.valueOf(ctx.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).getString(THEME_KEY, RebuildThemeMode.System.name) ?: RebuildThemeMode.System.name)
+    RebuildThemeMode.valueOf(
+        ctx.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE)
+            .getString(THEME_KEY, RebuildThemeMode.System.name) ?: RebuildThemeMode.System.name,
+    )
 }.getOrDefault(RebuildThemeMode.System)
-internal fun saveThemeMode(ctx: Context, mode: RebuildThemeMode) = ctx.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).edit().putString(THEME_KEY, mode.name).apply()
+
+internal fun saveThemeMode(ctx: Context, mode: RebuildThemeMode) =
+    ctx.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE)
+        .edit().putString(THEME_KEY, mode.name).apply()
 
 @Composable
 internal fun RebuildStateCard(title: String, body: String) {
@@ -69,29 +76,57 @@ internal fun DevicesV2Screen(viewModel: AppViewModel, onAddDevice: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(refresh) {
-        loading = true; error = null
-        runCatching { viewModel.pairedDevices() }.onSuccess { devices = it }.onFailure { error = it.message ?: "Devices could not be loaded." }
+        loading = true
+        error = null
+        runCatching { viewModel.pairedDevices() }
+            .onSuccess { devices = it }
+            .onFailure { error = it.message ?: "Devices could not be loaded." }
         loading = false
     }
 
     StandardPage("DEVICES", "Your connected ecosystem", "Choose the active source without losing any history.") {
-        item { Button(onClick = onAddDevice) { Text("Add a device") } }
+        item { NavigationCard("Add a device", "Pair a wearable, HR strap or supported gym source", onAddDevice) }
         when {
             loading -> item { RebuildStateCard("Loading devices", "Reading paired sources from the local registry.") }
             error != null -> item { RebuildStateCard("Devices unavailable", error ?: "Unknown error") }
             devices.isEmpty() -> item { RebuildStateCard("No paired devices", "Add a supported wearable, strap or gym source.") }
             else -> items(devices.size) { i ->
                 val d = devices[i]
-                NoopSurface(level = if (d.status == DeviceStatus.active.name) NoopSurfaceLevel.Elevated else NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
+                NoopSurface(
+                    level = if (d.status == DeviceStatus.active.name) NoopSurfaceLevel.Elevated else NoopSurfaceLevel.Standard,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column { Text(d.nickname ?: "${d.brand} ${d.model}", style = MaterialTheme.typography.bodyLarge); Text(d.sourceKind, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            Column {
+                                Text(d.nickname ?: "${d.brand} ${d.model}", style = MaterialTheme.typography.bodyLarge)
+                                Text(d.sourceKind, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             Text(d.status.uppercase(), style = NoopType.labelCaps, color = MaterialTheme.colorScheme.primary)
                         }
-                        Text(d.capabilities.split(',').filter(String::isNotBlank).joinToString(" · ").ifBlank { "Capabilities not reported" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            d.capabilities.split(',').filter(String::isNotBlank).joinToString(" · ")
+                                .ifBlank { "Capabilities not reported" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-                            if (d.status != DeviceStatus.active.name && d.status != DeviceStatus.archived.name) Button(onClick = { scope.launch { runCatching { viewModel.setActiveDevice(d.id) }.onFailure { error = it.message }; refresh++ } }) { Text("Make active") }
-                            if (d.status != DeviceStatus.archived.name) Button(onClick = { scope.launch { runCatching { viewModel.archivePairedDevice(d.id) }.onFailure { error = it.message }; refresh++ } }) { Text("Archive") }
+                            if (d.status != DeviceStatus.active.name && d.status != DeviceStatus.archived.name) {
+                                Button(onClick = {
+                                    scope.launch {
+                                        runCatching { viewModel.setActiveDevice(d.id) }.onFailure { error = it.message }
+                                        refresh++
+                                    }
+                                }) { Text("Make active") }
+                            }
+                            if (d.status != DeviceStatus.archived.name) {
+                                Button(onClick = {
+                                    scope.launch {
+                                        runCatching { viewModel.archivePairedDevice(d.id) }.onFailure { error = it.message }
+                                        refresh++
+                                    }
+                                }) { Text("Archive") }
+                            }
                         }
                     }
                 }
@@ -111,76 +146,152 @@ internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit,
     val hcStatus = remember { HealthConnectImporter.sdkStatus(context) }
 
     fun runHealthConnectImport() {
-        hcBusy = true; hcMessage = null
+        hcBusy = true
+        hcMessage = null
         scope.launch {
             val result = runCatching { HealthConnectImporter.import(context, viewModel.repo, 0.0) }
-            result.onSuccess { hcMessage = it.message }.onFailure { hcMessage = it.message ?: "Health Connect import failed." }
+            result.onSuccess { hcMessage = it.message }
+                .onFailure { hcMessage = it.message ?: "Health Connect import failed." }
             hcBusy = false
         }
     }
 
-    val hcPermissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+    val hcPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract(),
+    ) { granted ->
         HealthConnectImporter.markPermissionsAsked(context)
-        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) runHealthConnectImport() else hcMessage = "Health Connect access was not granted."
-    }
-
-    fun startHealthConnect() {
-        if (hcStatus != HealthConnectClient.SDK_AVAILABLE) { hcMessage = "Health Connect is not available on this device."; return }
-        scope.launch {
-            val granted = runCatching { HealthConnectImporter.client(context).permissionController.getGrantedPermissions() }.getOrDefault(emptySet())
-            if (granted.any { it in HealthConnectImporter.PERMISSIONS } && !HealthConnectImporter.hasUnaskedPermissions(context)) runHealthConnectImport()
-            else hcPermissionLauncher.launch(HealthConnectImporter.PERMISSIONS)
+        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
+            runHealthConnectImport()
+        } else {
+            hcMessage = "Health Connect access was not granted."
         }
     }
 
-    LaunchedEffect(Unit) { runCatching { viewModel.pairedDevices() }.onSuccess { devices = it }.onFailure { error = it.message } }
+    fun startHealthConnect() {
+        if (hcStatus != HealthConnectClient.SDK_AVAILABLE) {
+            hcMessage = "Health Connect is not available on this device."
+            return
+        }
+        scope.launch {
+            val granted = runCatching {
+                HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
+            }.getOrDefault(emptySet())
+            if (granted.any { it in HealthConnectImporter.PERMISSIONS } &&
+                !HealthConnectImporter.hasUnaskedPermissions(context)
+            ) {
+                runHealthConnectImport()
+            } else {
+                hcPermissionLauncher.launch(HealthConnectImporter.PERMISSIONS)
+            }
+        }
+    }
 
-    StandardPage("DATA", "Know where every signal comes from", "NOOP keeps sources explicit so imported, wearable and computed data are never silently blended.") {
+    LaunchedEffect(Unit) {
+        runCatching { viewModel.pairedDevices() }
+            .onSuccess { devices = it }
+            .onFailure { error = it.message }
+    }
+
+    StandardPage(
+        "DATA",
+        "Know where every signal comes from",
+        "NOOP keeps sources explicit so imported, wearable and computed data are never silently blended.",
+    ) {
         item {
             NoopSurface(level = NoopSurfaceLevel.Elevated, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                     Text("HEALTH CONNECT", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (hcStatus == HealthConnectClient.SDK_AVAILABLE) "Available on this device" else "Not currently available", style = MaterialTheme.typography.bodyLarge)
-                    Text("Import the Health Connect record types you choose to share. Partial permissions are supported.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(enabled = !hcBusy && hcStatus == HealthConnectClient.SDK_AVAILABLE, onClick = ::startHealthConnect) { Text(if (hcBusy) "Importing…" else "Import from Health Connect") }
-                    hcMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Text(
+                        if (hcStatus == HealthConnectClient.SDK_AVAILABLE) "Available on this device" else "Not currently available",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        "Import the Health Connect record types you choose to share. Partial permissions are supported.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        enabled = !hcBusy && hcStatus == HealthConnectClient.SDK_AVAILABLE,
+                        onClick = ::startHealthConnect,
+                    ) { Text(if (hcBusy) "Importing…" else "Import from Health Connect") }
+                    hcMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
-        item { Button(onClick = onFileImports) { Text("Import files & exports") } }
-        if (error != null) item { RebuildStateCard("Sources unavailable", error ?: "Unknown error") }
-        else if (devices.isEmpty()) item { RebuildStateCard("No data sources", "Add a wearable or import source to start building history.") }
-        else items(devices.size) { i ->
-            val d = devices[i]
-            NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
-                    Text(d.nickname ?: "${d.brand} ${d.model}", style = MaterialTheme.typography.bodyLarge)
-                    Text("${d.sourceKind} · ${d.status}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(d.capabilities.split(',').filter(String::isNotBlank).joinToString(" · "), style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        item { NavigationCard("Import files & exports", "WHOOP, Apple Health, wearable, activity and nutrition files", onFileImports) }
+        if (error != null) {
+            item { RebuildStateCard("Sources unavailable", error ?: "Unknown error") }
+        } else if (devices.isEmpty()) {
+            item { RebuildStateCard("No data sources", "Add a wearable or import source to start building history.") }
+        } else {
+            items(devices.size) { i ->
+                val d = devices[i]
+                NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+                        Text(d.nickname ?: "${d.brand} ${d.model}", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "${d.sourceKind} · ${d.status}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            d.capabilities.split(',').filter(String::isNotBlank).joinToString(" · "),
+                            style = NoopType.labelCaps,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
-        item { Button(onClick = onDevices) { Text("Manage devices") } }
+        item { NavigationCard("Manage devices", "Review active, paired and archived sources", onDevices) }
     }
 }
 
 @Composable
-internal fun SettingsV2Screen(themeMode: RebuildThemeMode, onThemeMode: (RebuildThemeMode) -> Unit, onBackup: () -> Unit, onAdvanced: () -> Unit) {
+internal fun SettingsV2Screen(
+    themeMode: RebuildThemeMode,
+    onThemeMode: (RebuildThemeMode) -> Unit,
+    onBackup: () -> Unit,
+    onAdvanced: () -> Unit,
+) {
     val context = LocalContext.current
-    var metric by remember { mutableStateOf(context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).getBoolean(METRIC_KEY, true)) }
+    var metric by remember {
+        mutableStateOf(context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).getBoolean(METRIC_KEY, true))
+    }
     StandardPage("SETTINGS", "Make NOOP yours", "Appearance and unit preferences are stored locally on this device.") {
         item {
             NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.md)) {
                     Text("APPEARANCE", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    RebuildThemeMode.entries.forEach { mode -> Row(modifier = Modifier.fillMaxWidth().clickable { onThemeMode(mode) }, horizontalArrangement = Arrangement.SpaceBetween) { Text(mode.name, style = MaterialTheme.typography.bodyLarge); Text(if (themeMode == mode) "Selected" else "", color = MaterialTheme.colorScheme.primary) } }
+                    RebuildThemeMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onThemeMode(mode) },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(mode.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(if (themeMode == mode) "Selected" else "", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
             }
         }
-        item { ToggleCard("Metric units", "Use metric units where applicable", metric) { metric = it; context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).edit().putBoolean(METRIC_KEY, it).apply() } }
-        item { Button(onClick = onBackup) { Text("Backup & restore") } }
-        item { Button(onClick = onAdvanced) { Text("Advanced settings") } }
-        item { RebuildStateCard("Privacy by architecture", "NOOP remains account-free and local-first. Settings here do not create a cloud profile.") }
+        item {
+            ToggleCard("Metric units", "Use metric units where applicable", metric) {
+                metric = it
+                context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE)
+                    .edit().putBoolean(METRIC_KEY, it).apply()
+            }
+        }
+        item { NavigationCard("Backup & restore", "Local snapshots, scheduled backup and safe restore", onBackup) }
+        item { NavigationCard("Advanced settings", "Specialist controls not needed day to day", onAdvanced) }
+        item {
+            RebuildStateCard(
+                "Privacy by architecture",
+                "NOOP remains account-free and local-first. Settings here do not create a cloud profile.",
+            )
+        }
     }
 }
 
@@ -190,29 +301,106 @@ internal fun NotificationsV2Screen(onAdvanced: () -> Unit) {
     var master by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) }
     var worn by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.WORN, true)) }
     var quiet by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.QUIET, false)) }
-    StandardPage("NOTIFICATIONS", "Only the alerts you choose", "Wrist mirroring uses Android notification access and the same persisted preferences as the background bridge.") {
-        item { ToggleCard("Wrist alerts", "Master switch for mirrored alerts", master) { master = it; NotifPrefs.setBool(context, NotifPrefs.MASTER, it) } }
-        item { ToggleCard("Only when worn", "Suppress strap alerts when the band is not being worn", worn) { worn = it; NotifPrefs.setBool(context, NotifPrefs.WORN, it) } }
-        item { ToggleCard("Quiet hours", "Respect the configured overnight quiet window", quiet) { quiet = it; NotifPrefs.setBool(context, NotifPrefs.QUIET, it) } }
-        item { Button(onClick = onAdvanced) { Text("Per-app alerts & call patterns") } }
-        item { Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Open notification access") } }
+    StandardPage(
+        "NOTIFICATIONS",
+        "Only the alerts you choose",
+        "Wrist mirroring uses Android notification access and the same persisted preferences as the background bridge.",
+    ) {
+        item {
+            ToggleCard("Wrist alerts", "Master switch for mirrored alerts", master) {
+                master = it
+                NotifPrefs.setBool(context, NotifPrefs.MASTER, it)
+            }
+        }
+        item {
+            ToggleCard("Only when worn", "Suppress strap alerts when the band is not being worn", worn) {
+                worn = it
+                NotifPrefs.setBool(context, NotifPrefs.WORN, it)
+            }
+        }
+        item {
+            ToggleCard("Quiet hours", "Respect the configured overnight quiet window", quiet) {
+                quiet = it
+                NotifPrefs.setBool(context, NotifPrefs.QUIET, it)
+            }
+        }
+        item {
+            NavigationCard("Per-app alerts & call patterns", "Choose apps, vibration patterns and call behaviour", onAdvanced)
+        }
+        item {
+            NavigationCard("Android notification access", "Open the system permission used for notification mirroring") {
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun ToggleCard(title: String, body: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) { Text(title, style = MaterialTheme.typography.bodyLarge); Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Switch(checked = checked, onCheckedChange = onChange)
         }
     }
 }
 
 @Composable
-private fun StandardPage(overline: String, headline: String, subtitle: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(NoopSpacing.screenHorizontal, NoopSpacing.lg, NoopSpacing.screenHorizontal, NoopSpacing.xxxl), verticalArrangement = Arrangement.spacedBy(NoopSpacing.lg)) {
-        item { Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) { Text(overline, style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(headline, style = NoopType.editorialHeadline); Text(subtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+private fun NavigationCard(title: String, body: String, onClick: () -> Unit) {
+    NoopSurface(
+        level = NoopSurfaceLevel.Standard,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NoopSpacing.md),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun StandardPage(
+    overline: String,
+    headline: String,
+    subtitle: String,
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            NoopSpacing.screenHorizontal,
+            NoopSpacing.lg,
+            NoopSpacing.screenHorizontal,
+            NoopSpacing.xxxl,
+        ),
+        verticalArrangement = Arrangement.spacedBy(NoopSpacing.lg),
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+                Text(overline, style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(headline, style = NoopType.editorialHeadline)
+                Text(subtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         content()
     }
 }
