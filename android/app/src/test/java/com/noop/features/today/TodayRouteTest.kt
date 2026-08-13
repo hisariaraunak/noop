@@ -26,6 +26,27 @@ class TodayRouteTest {
         assertEquals(false, snapshot.dataComplete)
     }
 
+    @Test fun nonFiniteSensorValuesDegradeToMissingInsteadOfThrowing() {
+        val bad = DailyMetric(
+            deviceId = "test",
+            day = "2026-08-12",
+            totalSleepMin = Double.NaN,
+            efficiency = Double.POSITIVE_INFINITY,
+            restingHr = 50,
+            avgHrv = Double.NaN,
+            recovery = Double.NaN,
+            strain = Double.NEGATIVE_INFINITY,
+        )
+
+        val snapshot = buildTodaySnapshot(listOf(bad))
+        assertNull(snapshot.recovery)
+        assertNull(snapshot.hrvMs)
+        assertNull(snapshot.sleepMinutes)
+        assertNull(snapshot.sleepEfficiencyPct)
+        assertNull(snapshot.strain)
+        assertEquals(false, snapshot.dataComplete)
+    }
+
     private fun metric(day: String, hrv: Double, rhr: Int) = DailyMetric(
         deviceId = "test",
         day = day,
