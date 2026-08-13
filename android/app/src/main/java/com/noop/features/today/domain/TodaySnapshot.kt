@@ -24,28 +24,43 @@ object TodaySnapshotMapper {
         hrvBaseline: BaselineState? = null,
         restingHrBaseline: BaselineState? = null,
     ): TodaySnapshot {
-        val hrvDeltaPct = if (daily.avgHrv != null && hrvBaseline?.usable == true && hrvBaseline.baseline > 0) {
-            (((daily.avgHrv / hrvBaseline.baseline) - 1.0) * 100.0).roundToInt()
+        // Sensor/import pipelines can occasionally surface NaN/Infinity. Never allow those values to
+        // reach roundToInt() or UI math: Kotlin throws IllegalArgumentException for NaN rounding.
+        val recovery = daily.recovery?.takeIf { it.isFinite() }
+        val strain = daily.strain?.takeIf { it.isFinite() }
+        val sleepMinutes = daily.totalSleepMin?.takeIf { it.isFinite() }
+        val efficiency = daily.efficiency?.takeIf { it.isFinite() }
+        val hrv = daily.avgHrv?.takeIf { it.isFinite() }
+
+        val hrvBaselineValue = hrvBaseline?.baseline?.takeIf { it.isFinite() && it > 0.0 }
+        val restingHrBaselineValue = restingHrBaseline?.baseline?.takeIf { it.isFinite() }
+
+        val hrvDeltaPct = if (hrv != null && hrvBaseline?.usable == true && hrvBaselineValue != null) {
+            (((hrv / hrvBaselineValue) - 1.0) * 100.0)
+                .takeIf { it.isFinite() }
+                ?.roundToInt()
         } else null
 
-        val rhrDelta = if (daily.restingHr != null && restingHrBaseline?.usable == true) {
-            (daily.restingHr - restingHrBaseline.baseline).roundToInt()
+        val rhrDelta = if (daily.restingHr != null && restingHrBaseline?.usable == true && restingHrBaselineValue != null) {
+            (daily.restingHr - restingHrBaselineValue)
+                .takeIf { it.isFinite() }
+                ?.roundToInt()
         } else null
 
         return TodaySnapshot(
             day = daily.day,
-            recovery = daily.recovery?.roundToInt()?.coerceIn(0, 100),
-            strain = daily.strain,
-            sleepMinutes = daily.totalSleepMin,
-            sleepEfficiencyPct = daily.efficiency?.let { efficiency ->
-                val pct = if (efficiency <= 1.0) efficiency * 100.0 else efficiency
-                pct.roundToInt().coerceIn(0, 100)
+            recovery = recovery?.roundToInt()?.coerceIn(0, 100),
+            strain = strain,
+            sleepMinutes = sleepMinutes,
+            sleepEfficiencyPct = efficiency?.let { value ->
+                val pct = if (value <= 1.0) value * 100.0 else value
+                pct.takeIf { it.isFinite() }?.roundToInt()?.coerceIn(0, 100)
             },
-            hrvMs = daily.avgHrv,
+            hrvMs = hrv,
             restingHrBpm = daily.restingHr,
             hrvVsBaselinePct = hrvDeltaPct,
             restingHrVsBaselineBpm = rhrDelta,
-            dataComplete = daily.recovery != null && daily.avgHrv != null && daily.restingHr != null && daily.totalSleepMin != null,
+            dataComplete = recovery != null && hrv != null && daily.restingHr != null && sleepMinutes != null,
         )
     }
 }
