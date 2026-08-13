@@ -18,10 +18,7 @@ enum class NoopSurfaceLevel {
     Glass,
 }
 
-/**
- * Base container for the rebuild. Glass is an explicit choice rather than the default card treatment.
- * Data-dense screens should normally use [Standard] or [Elevated].
- */
+/** Compact base container. Glass remains a deliberate accent, never the default treatment. */
 @Composable
 fun NoopSurface(
     modifier: Modifier = Modifier,
@@ -40,13 +37,17 @@ fun NoopSurface(
         else -> null
     }
     val elevation = when (level) {
-        NoopSurfaceLevel.Elevated -> 2.dp
+        NoopSurfaceLevel.Elevated -> 1.dp
         else -> 0.dp
+    }
+    val radius = when (level) {
+        NoopSurfaceLevel.Glass -> NoopRadii.hero
+        else -> NoopRadii.large
     }
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(NoopRadii.large),
+        shape = RoundedCornerShape(radius),
         color = color,
         border = border,
         tonalElevation = elevation,
