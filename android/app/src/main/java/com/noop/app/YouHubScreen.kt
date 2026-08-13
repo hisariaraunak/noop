@@ -44,29 +44,29 @@ internal fun YouHubScreen(
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
                 Text("YOU", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Your NOOP", style = NoopType.editorialHeadline)
-                Text("Your activity, hardware, data and preferences — kept on your device.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Activity, devices, data and preferences — all in one place.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
             NoopSurface(level = NoopSurfaceLevel.Glass, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
                     Text("PRIVATE BY DEFAULT", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Your health data stays yours", style = NoopType.editorialHeadline)
-                    Text("NOOP is designed around local storage and direct device connections rather than an account-first cloud model.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Your health data stays yours", style = MaterialTheme.typography.bodyLarge)
+                    Text("Stored locally and connected directly to your devices.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 Text("ACTIVITY", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                YouRow("Workouts", "Review recent exercise and strain", Icons.Filled.FitnessCenter, onWorkouts)
+                YouRow("Workouts", "Recent exercise and strain", Icons.Filled.FitnessCenter, onWorkouts)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 Text("DEVICE & DATA", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 YouRow("Devices", "Manage paired sources", Icons.Filled.Sensors, onDevices)
-                YouRow("Data sources", "Health Connect, imports and provenance", Icons.Filled.Storage, onDataSources)
+                YouRow("Data sources", "Health Connect and imports", Icons.Filled.Storage, onDataSources)
             }
         }
         item {
