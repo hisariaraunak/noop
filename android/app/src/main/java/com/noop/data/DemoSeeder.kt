@@ -13,48 +13,35 @@ import kotlin.random.Random
 
 /**
  * Seeds a comprehensive, self-contained demo dataset so the **demo** build is a full
- * walkthrough of every screen — Today, Sleep, Trends, Workouts, Health, Stress,
- * Insights, Explore, Compare, Apple Health — with no strap and no import required.
+ * walkthrough of every screen with no strap and no import required.
  *
  * The caller gates this to `BuildConfig.ENABLE_DEMO`, so the full app never seeds and
  * starts clean. It is a no-op if "my-whoop" already holds daily rows, so it runs at most
  * once and never clobbers real data.
  *
- * Everything here is **synthetic and deterministic** (fixed RNG seed). Nothing is real
- * biometric data. Values are physiologically plausible and internally correlated
- * (recovery ↔ HRV ↔ resting-HR ↔ sleep; strain ↔ workouts; a slow fitness drift over
- * the window) so the charts, trends and insights all read like a real account.
+ * Everything here is synthetic and deterministic. Nothing is real biometric data.
  */
 object DemoSeeder {
 
     private const val WHOOP = "my-whoop"
     private const val APPLE = "apple-health"
     private const val WHOOP_NOOP = "$WHOOP-noop"
-
-    /** One month of synthetic history for debug/device QA. */
     private const val DAYS = 30
-
-    /** Effort rescale factor: the old 0–21 strain scale → the new 0–100 Effort scale (100/21). */
     private const val STRAIN_SCALE = 100.0 / 21.0
 
     private val SPORTS = listOf(
         "Running", "Cycling", "Strength", "HIIT", "Swimming", "Yoga", "Walking", "Rowing"
     )
 
-    /** Seed only if the demo (and the user) has no daily history yet. Safe to call on every launch. */
     suspend fun seedIfEmpty(repo: WhoopRepository) {
         if (repo.days(WHOOP).isNotEmpty()) return
         seed(repo)
     }
 
-    /**
-     * Demo-only: seed a SECOND paired device (a Polar H10) into the registry so the Devices screen shows
-     * the WHOOP (Active) alongside a paired generic strap out of the box — no real hardware needed.
-     */
     suspend fun seedDemoDeviceIfNeeded(registry: DeviceRegistry) {
         val devices = registry.all()
         if (devices.size != 1) return
-        if (!SourceCoordinatorIsWhoop(devices.first())) return
+        if (!sourceCoordinatorIsWhoop(devices.first())) return
         val now = System.currentTimeMillis() / 1000
         registry.add(
             PairedDeviceRow(
@@ -71,8 +58,8 @@ object DemoSeeder {
         )
     }
 
-    private fun SourceCoordinatorIsWhoop(d: PairedDeviceRow): Boolean =
-        d.id == "my-whoop" || d.brand.equals("WHOOP", ignoreCase = true)
+    private fun sourceCoordinatorIsWhoop(d: PairedDeviceRow): Boolean =
+        d.id == WHOOP || d.brand.equals("WHOOP", ignoreCase = true)
 
     private suspend fun seed(repo: WhoopRepository) {
         val rng = Random(0xC0FFEE)
@@ -172,7 +159,7 @@ object DemoSeeder {
 
             repeat(nWorkouts) { k ->
                 val sport = SPORTS[rng.nextInt(SPORTS.size)]
-                val durSec = (gauss(rng, 48.0, 16.0).coerceIn(18.0, 110.0) * 60)
+                val durSec = gauss(rng, 48.0, 16.0).coerceIn(18.0, 110.0) * 60
                 val start = date.atTime(if (weekend) 9 else 18, rng.nextInt(0, 50)).atZone(zone).toEpochSecond() + k * 3600
                 val avg = gauss(rng, 138.0, 12.0).toInt()
                 val src = if (rng.nextDouble() < 0.7) WHOOP else APPLE
@@ -203,7 +190,6 @@ object DemoSeeder {
             journal.add(JournalEntry(WHOOP, day, "Felt stressed?", rng.nextDouble() < 0.28))
         }
 
-        // Weekly computed metrics for detail/trend surfaces.
         var fitnessAge = 42.0
         var vo2 = 44.0
         var vitality = 55.0
@@ -220,12 +206,12 @@ object DemoSeeder {
             bodyAgeDemo -= 0.25
         }
 
-        repo.upsertDaily(daily)
-        repo.upsertSleeps(sleeps)
+        repo.upsertDailyMetrics(daily)
+        repo.upsertSleepSessions(sleeps)
         repo.upsertMetricSeries(series)
         repo.upsertAppleDaily(apple)
-        repo.upsertWorkouts(workouts)
-        repo.upsertJournal(journal)
+        if (workouts.isNotEmpty()) repo.upsertWorkouts(workouts)
+        if (journal.isNotEmpty()) repo.upsertJournal(journal)
     }
 
     private fun gauss(rng: Random, mean: Double, sd: Double): Double {
@@ -237,14 +223,19 @@ object DemoSeeder {
     private fun round1(v: Double): Double = round(v * 10.0) / 10.0
     private fun round2(v: Double): Double = round(v * 100.0) / 100.0
 
-    private fun stagesJson(deep: Double, rem: Double, light: Double, disturbances: Int): String {
+    private fun stagesJson(deep: Double, rem: Double, light: Double, awakeMin: Int): String {
         val arr = JSONArray()
-        fun add(stage: String, minutes: Double) {
-            arr.put(JSONObject().put("stage", stage).put("minutes", round1(minutes)))
+        fun seg(stage: String, min: Double) {
+            arr.put(JSONObject().put("stage", stage).put("min", round1(min)))
         }
-        add("deep", deep)
-        add("rem", rem)
-        add("light", light)
-        return JSONObject().put("stages", arr).put("disturbances", disturbances).toString()
+        seg("light", light * 0.35)
+        seg("deep", deep * 0.6)
+        seg("light", light * 0.30)
+        seg("rem", rem * 0.6)
+        seg("deep", deep * 0.4)
+        seg("light", light * 0.35)
+        seg("rem", rem * 0.4)
+        seg("awake", awakeMin.toDouble())
+        return arr.toString()
     }
 }
