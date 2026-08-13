@@ -2,6 +2,7 @@ package com.noop.app
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -25,7 +26,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -40,44 +43,23 @@ import com.noop.ui.SettingsScreen
 import com.noop.ui.designsystem.NoopDesignTheme
 
 private enum class RebuildDestination(val route: String, val label: String) {
-    Today("today_v2", "Today"),
-    Journal("journal_v2", "Journal"),
-    Trends("trends_v2", "Trends"),
-    You("you_v2", "You"),
+    Today("today_v2", "Today"), Journal("journal_v2", "Journal"), Trends("trends_v2", "Trends"), You("you_v2", "You"),
 }
 
 private object RebuildRoute {
-    const val Recovery = "health/recovery"
-    const val Sleep = "health/sleep"
-    const val Strain = "health/strain"
-    const val JournalEditor = "journal/editor"
-    const val Workouts = "you/workouts"
-    const val Devices = "you/devices"
-    const val AddDevice = "you/devices/add"
-    const val DataSources = "you/data-sources"
-    const val FileImports = "you/data-sources/imports"
-    const val Notifications = "you/notifications"
-    const val NotificationsAdvanced = "you/notifications/advanced"
-    const val Settings = "you/settings"
-    const val SettingsAdvanced = "you/settings/advanced"
-    const val Backup = "you/settings/backup"
+    const val Recovery = "health/recovery"; const val Sleep = "health/sleep"; const val Strain = "health/strain"
+    const val JournalEditor = "journal/editor"; const val Workouts = "you/workouts"; const val Devices = "you/devices"
+    const val AddDevice = "you/devices/add"; const val DataSources = "you/data-sources"; const val FileImports = "you/data-sources/imports"
+    const val Notifications = "you/notifications"; const val NotificationsAdvanced = "you/notifications/advanced"
+    const val Settings = "you/settings"; const val SettingsAdvanced = "you/settings/advanced"; const val Backup = "you/settings/backup"
 }
 
 private fun secondaryTitle(route: String): String = when (route) {
-    RebuildRoute.Recovery -> "Recovery"
-    RebuildRoute.Sleep -> "Sleep"
-    RebuildRoute.Strain -> "Strain"
-    RebuildRoute.JournalEditor -> "Journal"
-    RebuildRoute.Workouts -> "Workouts"
-    RebuildRoute.Devices -> "Devices"
-    RebuildRoute.AddDevice -> "Add device"
-    RebuildRoute.DataSources -> "Data sources"
-    RebuildRoute.FileImports -> "Import data"
-    RebuildRoute.Notifications -> "Notifications"
-    RebuildRoute.NotificationsAdvanced -> "Advanced notifications"
-    RebuildRoute.Settings -> "Settings"
-    RebuildRoute.SettingsAdvanced -> "Advanced settings"
-    RebuildRoute.Backup -> "Backup & restore"
+    RebuildRoute.Recovery -> "Recovery"; RebuildRoute.Sleep -> "Sleep"; RebuildRoute.Strain -> "Strain"
+    RebuildRoute.JournalEditor -> "Journal"; RebuildRoute.Workouts -> "Workouts"; RebuildRoute.Devices -> "Devices"
+    RebuildRoute.AddDevice -> "Add device"; RebuildRoute.DataSources -> "Data sources"; RebuildRoute.FileImports -> "Import data"
+    RebuildRoute.Notifications -> "Notifications"; RebuildRoute.NotificationsAdvanced -> "Advanced notifications"
+    RebuildRoute.Settings -> "Settings"; RebuildRoute.SettingsAdvanced -> "Advanced settings"; RebuildRoute.Backup -> "Backup & restore"
     else -> "NOOP"
 }
 
@@ -87,11 +69,7 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
     val context = LocalContext.current
     val systemDark = isSystemInDarkTheme()
     var themeMode by remember { mutableStateOf(loadThemeMode(context)) }
-    val dark = when (themeMode) {
-        RebuildThemeMode.System -> systemDark
-        RebuildThemeMode.Light -> false
-        RebuildThemeMode.Dark -> true
-    }
+    val dark = when (themeMode) { RebuildThemeMode.System -> systemDark; RebuildThemeMode.Light -> false; RebuildThemeMode.Dark -> true }
 
     NoopDesignTheme(darkTheme = dark) {
         val nav = rememberNavController()
@@ -105,17 +83,17 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                 if (!isPrimary) {
                     CenterAlignedTopAppBar(
                         title = { Text(secondaryTitle(currentRoute), style = MaterialTheme.typography.titleMedium) },
-                        navigationIcon = {
-                            IconButton(onClick = { nav.popBackStack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        },
+                        navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                     )
                 }
             },
             bottomBar = {
                 if (isPrimary) {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    NavigationBar(
+                        modifier = Modifier.height(68.dp),
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp,
+                    ) {
                         RebuildDestination.entries.forEach { destination ->
                             val icon = when (destination) {
                                 RebuildDestination.Today -> Icons.Filled.Home
@@ -127,17 +105,16 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                                 selected = currentRoute == destination.route,
                                 onClick = {
                                     nav.navigate(destination.route) {
-                                        launchSingleTop = true
-                                        restoreState = true
+                                        launchSingleTop = true; restoreState = true
                                         popUpTo(RebuildDestination.Today.route) { saveState = true }
                                     }
                                 },
                                 icon = { Icon(icon, contentDescription = destination.label) },
-                                label = { Text(destination.label) },
+                                label = { Text(destination.label, style = MaterialTheme.typography.labelMedium) },
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
                                     selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    indicatorColor = Color.Transparent,
                                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 ),
@@ -147,74 +124,25 @@ fun RebuildAppRoot(viewModel: AppViewModel) {
                 }
             },
         ) { innerPadding ->
-            NavHost(
-                navController = nav,
-                startDestination = RebuildDestination.Today.route,
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-            ) {
-                composable(RebuildDestination.Today.route) {
-                    TodayRoute(
-                        viewModel,
-                        onRecovery = { nav.navigate(RebuildRoute.Recovery) },
-                        onSleep = { nav.navigate(RebuildRoute.Sleep) },
-                        onStrain = { nav.navigate(RebuildRoute.Strain) },
-                    )
-                }
-                composable(RebuildDestination.Journal.route) {
-                    JournalOverviewScreen(viewModel, onOpenJournal = { nav.navigate(RebuildRoute.JournalEditor) })
-                }
+            NavHost(navController = nav, startDestination = RebuildDestination.Today.route, modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                composable(RebuildDestination.Today.route) { TodayRoute(viewModel, onRecovery = { nav.navigate(RebuildRoute.Recovery) }, onSleep = { nav.navigate(RebuildRoute.Sleep) }, onStrain = { nav.navigate(RebuildRoute.Strain) }) }
+                composable(RebuildDestination.Journal.route) { JournalOverviewScreen(viewModel, onOpenJournal = { nav.navigate(RebuildRoute.JournalEditor) }) }
                 composable(RebuildDestination.Trends.route) { TrendsOverviewScreen(viewModel) }
-                composable(RebuildDestination.You.route) {
-                    YouHubScreen(
-                        onWorkouts = { nav.navigate(RebuildRoute.Workouts) },
-                        onDevices = { nav.navigate(RebuildRoute.Devices) },
-                        onDataSources = { nav.navigate(RebuildRoute.DataSources) },
-                        onNotifications = { nav.navigate(RebuildRoute.Notifications) },
-                        onSettings = { nav.navigate(RebuildRoute.Settings) },
-                    )
-                }
+                composable(RebuildDestination.You.route) { YouHubScreen(onWorkouts = { nav.navigate(RebuildRoute.Workouts) }, onDevices = { nav.navigate(RebuildRoute.Devices) }, onDataSources = { nav.navigate(RebuildRoute.DataSources) }, onNotifications = { nav.navigate(RebuildRoute.Notifications) }, onSettings = { nav.navigate(RebuildRoute.Settings) }) }
                 composable(RebuildRoute.Recovery) { HealthDetailScreen(viewModel, HealthMetric.Recovery) }
                 composable(RebuildRoute.Sleep) { HealthDetailScreen(viewModel, HealthMetric.Sleep) }
                 composable(RebuildRoute.Strain) { HealthDetailScreen(viewModel, HealthMetric.Strain) }
                 composable(RebuildRoute.JournalEditor) { JournalEditorV2(viewModel) }
                 composable(RebuildRoute.Workouts) { WorkoutsV2Screen(viewModel) }
-                composable(RebuildRoute.Devices) {
-                    DevicesV2Screen(viewModel, onAddDevice = { nav.navigate(RebuildRoute.AddDevice) })
-                }
-                composable(RebuildRoute.AddDevice) {
-                    AddDeviceWizard(
-                        viewModel = viewModel,
-                        onClose = { nav.popBackStack() },
-                        onUseFileImport = { nav.navigate(RebuildRoute.FileImports) },
-                    )
-                }
-                composable(RebuildRoute.DataSources) {
-                    DataSourcesV2Screen(
-                        viewModel,
-                        onDevices = { nav.navigate(RebuildRoute.Devices) },
-                        onFileImports = { nav.navigate(RebuildRoute.FileImports) },
-                    )
-                }
+                composable(RebuildRoute.Devices) { DevicesV2Screen(viewModel, onAddDevice = { nav.navigate(RebuildRoute.AddDevice) }) }
+                composable(RebuildRoute.AddDevice) { AddDeviceWizard(viewModel = viewModel, onClose = { nav.popBackStack() }, onUseFileImport = { nav.navigate(RebuildRoute.FileImports) }) }
+                composable(RebuildRoute.DataSources) { DataSourcesV2Screen(viewModel, onDevices = { nav.navigate(RebuildRoute.Devices) }, onFileImports = { nav.navigate(RebuildRoute.FileImports) }) }
                 composable(RebuildRoute.FileImports) { DataSourcesScreen(viewModel) }
-                composable(RebuildRoute.Notifications) {
-                    NotificationsV2Screen(onAdvanced = { nav.navigate(RebuildRoute.NotificationsAdvanced) })
-                }
+                composable(RebuildRoute.Notifications) { NotificationsV2Screen(onAdvanced = { nav.navigate(RebuildRoute.NotificationsAdvanced) }) }
                 composable(RebuildRoute.NotificationsAdvanced) { NotificationsSettingsScreen(viewModel) }
-                composable(RebuildRoute.Settings) {
-                    SettingsV2Screen(
-                        themeMode = themeMode,
-                        onThemeMode = { mode ->
-                            themeMode = mode
-                            saveThemeMode(context, mode)
-                        },
-                        onBackup = { nav.navigate(RebuildRoute.Backup) },
-                        onAdvanced = { nav.navigate(RebuildRoute.SettingsAdvanced) },
-                    )
-                }
+                composable(RebuildRoute.Settings) { SettingsV2Screen(themeMode = themeMode, onThemeMode = { mode -> themeMode = mode; saveThemeMode(context, mode) }, onBackup = { nav.navigate(RebuildRoute.Backup) }, onAdvanced = { nav.navigate(RebuildRoute.SettingsAdvanced) }) }
                 composable(RebuildRoute.Backup) { BackupSyncScreen() }
-                composable(RebuildRoute.SettingsAdvanced) {
-                    SettingsScreen(vm = viewModel, onOpenBackupSync = { nav.navigate(RebuildRoute.Backup) })
-                }
+                composable(RebuildRoute.SettingsAdvanced) { SettingsScreen(vm = viewModel, onOpenBackupSync = { nav.navigate(RebuildRoute.Backup) }) }
             }
         }
     }
