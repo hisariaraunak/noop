@@ -32,12 +32,7 @@ fun MetricDelta(delta: MetricDeltaModel, modifier: Modifier = Modifier) {
         DeltaDirection.Negative -> "↓ "
         DeltaDirection.Neutral -> ""
     }
-    Text(
-        text = prefix + delta.text,
-        modifier = modifier,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-    )
+    Text(text = prefix + delta.text, modifier = modifier, style = MaterialTheme.typography.labelMedium, color = color)
 }
 
 @Composable
@@ -50,11 +45,7 @@ fun MetricValue(
     Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
         Text(value, style = NoopType.dataDisplay, color = color)
         if (!unit.isNullOrBlank()) {
-            Text(
-                text = " $unit",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(" $unit", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -69,26 +60,12 @@ fun MetricCard(
     modifier: Modifier = Modifier,
 ) {
     NoopSurface(modifier = modifier, level = NoopSurfaceLevel.Standard) {
-        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-            Text(
-                text = label.uppercase(),
-                style = NoopType.labelCaps,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                MetricValue(value = value, unit = unit)
-                delta?.let { MetricDelta(it) }
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+            Text(label.uppercase(), style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MetricValue(value = value, unit = unit)
+            delta?.let { MetricDelta(it) }
             if (!supportingText.isNullOrBlank()) {
-                Text(
-                    text = supportingText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(supportingText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
