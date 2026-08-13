@@ -61,7 +61,7 @@ internal fun RebuildStateCard(title: String, body: String) {
 }
 
 @Composable
-internal fun DevicesV2Screen(viewModel: AppViewModel) {
+internal fun DevicesV2Screen(viewModel: AppViewModel, onAddDevice: () -> Unit) {
     var devices by remember { mutableStateOf<List<PairedDeviceRow>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -75,10 +75,11 @@ internal fun DevicesV2Screen(viewModel: AppViewModel) {
     }
 
     StandardPage("DEVICES", "Your connected ecosystem", "Choose the active source without losing any history.") {
+        item { Button(onClick = onAddDevice) { Text("Add a device") } }
         when {
             loading -> item { RebuildStateCard("Loading devices", "Reading paired sources from the local registry.") }
             error != null -> item { RebuildStateCard("Devices unavailable", error ?: "Unknown error") }
-            devices.isEmpty() -> item { RebuildStateCard("No paired devices", "Pair a supported source from onboarding or the source setup flow.") }
+            devices.isEmpty() -> item { RebuildStateCard("No paired devices", "Add a supported wearable, strap or gym source.") }
             else -> items(devices.size) { i ->
                 val d = devices[i]
                 NoopSurface(level = if (d.status == DeviceStatus.active.name) NoopSurfaceLevel.Elevated else NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
@@ -100,7 +101,7 @@ internal fun DevicesV2Screen(viewModel: AppViewModel) {
 }
 
 @Composable
-internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit) {
+internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit, onFileImports: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<PairedDeviceRow>>(emptyList()) }
@@ -120,8 +121,7 @@ internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit)
 
     val hcPermissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
         HealthConnectImporter.markPermissionsAsked(context)
-        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) runHealthConnectImport()
-        else hcMessage = "Health Connect access was not granted."
+        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) runHealthConnectImport() else hcMessage = "Health Connect access was not granted."
     }
 
     fun startHealthConnect() {
@@ -147,6 +147,7 @@ internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit)
                 }
             }
         }
+        item { Button(onClick = onFileImports) { Text("Import files & exports") } }
         if (error != null) item { RebuildStateCard("Sources unavailable", error ?: "Unknown error") }
         else if (devices.isEmpty()) item { RebuildStateCard("No data sources", "Add a wearable or import source to start building history.") }
         else items(devices.size) { i ->
@@ -164,7 +165,7 @@ internal fun DataSourcesV2Screen(viewModel: AppViewModel, onDevices: () -> Unit)
 }
 
 @Composable
-internal fun SettingsV2Screen(themeMode: RebuildThemeMode, onThemeMode: (RebuildThemeMode) -> Unit) {
+internal fun SettingsV2Screen(themeMode: RebuildThemeMode, onThemeMode: (RebuildThemeMode) -> Unit, onBackup: () -> Unit, onAdvanced: () -> Unit) {
     val context = LocalContext.current
     var metric by remember { mutableStateOf(context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).getBoolean(METRIC_KEY, true)) }
     StandardPage("SETTINGS", "Make NOOP yours", "Appearance and unit preferences are stored locally on this device.") {
@@ -176,20 +177,15 @@ internal fun SettingsV2Screen(themeMode: RebuildThemeMode, onThemeMode: (Rebuild
                 }
             }
         }
-        item {
-            NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column { Text("Metric units", style = MaterialTheme.typography.bodyLarge); Text("Use metric units where applicable", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Switch(checked = metric, onCheckedChange = { metric = it; context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).edit().putBoolean(METRIC_KEY, it).apply() })
-                }
-            }
-        }
+        item { ToggleCard("Metric units", "Use metric units where applicable", metric) { metric = it; context.getSharedPreferences(REBUILD_PREFS, Context.MODE_PRIVATE).edit().putBoolean(METRIC_KEY, it).apply() } }
+        item { Button(onClick = onBackup) { Text("Backup & restore") } }
+        item { Button(onClick = onAdvanced) { Text("Advanced settings") } }
         item { RebuildStateCard("Privacy by architecture", "NOOP remains account-free and local-first. Settings here do not create a cloud profile.") }
     }
 }
 
 @Composable
-internal fun NotificationsV2Screen() {
+internal fun NotificationsV2Screen(onAdvanced: () -> Unit) {
     val context = LocalContext.current
     var master by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) }
     var worn by remember { mutableStateOf(NotifPrefs.getBool(context, NotifPrefs.WORN, true)) }
@@ -198,6 +194,7 @@ internal fun NotificationsV2Screen() {
         item { ToggleCard("Wrist alerts", "Master switch for mirrored alerts", master) { master = it; NotifPrefs.setBool(context, NotifPrefs.MASTER, it) } }
         item { ToggleCard("Only when worn", "Suppress strap alerts when the band is not being worn", worn) { worn = it; NotifPrefs.setBool(context, NotifPrefs.WORN, it) } }
         item { ToggleCard("Quiet hours", "Respect the configured overnight quiet window", quiet) { quiet = it; NotifPrefs.setBool(context, NotifPrefs.QUIET, it) } }
+        item { Button(onClick = onAdvanced) { Text("Per-app alerts & call patterns") } }
         item { Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Open notification access") } }
     }
 }
