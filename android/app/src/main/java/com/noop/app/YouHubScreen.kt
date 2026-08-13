@@ -37,23 +37,13 @@ internal fun YouHubScreen(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(NoopSpacing.screenHorizontal, NoopSpacing.lg, NoopSpacing.screenHorizontal, NoopSpacing.xxxl),
-        verticalArrangement = Arrangement.spacedBy(NoopSpacing.lg),
+        contentPadding = PaddingValues(NoopSpacing.screenHorizontal, NoopSpacing.md, NoopSpacing.screenHorizontal, NoopSpacing.xxxl),
+        verticalArrangement = Arrangement.spacedBy(NoopSpacing.md),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+            Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
                 Text("YOU", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Your NOOP", style = NoopType.editorialHeadline)
-                Text("Activity, devices, data and preferences — all in one place.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item {
-            NoopSurface(level = NoopSurfaceLevel.Glass, modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
-                    Text("PRIVATE BY DEFAULT", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Your health data stays yours", style = MaterialTheme.typography.bodyLarge)
-                    Text("Stored locally and connected directly to your devices.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text("Your NOOP", style = NoopType.screenTitle)
             }
         }
         item {
@@ -65,16 +55,23 @@ internal fun YouHubScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 Text("DEVICE & DATA", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                YouRow("Devices", "Manage paired sources", Icons.Filled.Sensors, onDevices)
+                YouRow("Devices", "Paired sources", Icons.Filled.Sensors, onDevices)
                 YouRow("Data sources", "Health Connect and imports", Icons.Filled.Storage, onDataSources)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 Text("PREFERENCES", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                YouRow("Notifications", "Choose what NOOP can surface", Icons.Filled.Notifications, onNotifications)
+                YouRow("Notifications", "Alerts and quiet hours", Icons.Filled.Notifications, onNotifications)
                 YouRow("Settings", "Units, appearance and privacy", Icons.Filled.Settings, onSettings)
             }
+        }
+        item {
+            Text(
+                "Private by default · health data is stored locally and connects directly to your devices.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -82,10 +79,14 @@ internal fun YouHubScreen(
 @Composable
 private fun YouRow(title: String, body: String, icon: ImageVector, onClick: () -> Unit) {
     NoopSurface(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), level = NoopSurfaceLevel.Standard) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NoopSpacing.md)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NoopSpacing.md),
+        ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(title, style = NoopType.sectionTitle)
                 Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
