@@ -38,6 +38,8 @@ fun TodayScreen(
     onStrain: () -> Unit = {},
 ) {
     val recommendation = TodayRecommendationEngine.recommend(snapshot)
+    val todayKey = LocalDate.now().toString()
+    val stale = snapshot.day != todayKey
     val greeting = when (LocalTime.now().hour) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening" }
     val date = runCatching { LocalDate.parse(snapshot.day).format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())) }
         .getOrElse { LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())) }
@@ -54,32 +56,23 @@ fun TodayScreen(
                 Text("Your body, translated into a plan for today.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (stale) item {
+            NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+                    Text("LATEST AVAILABLE DATA", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Today's sync is not available yet, so NOOP is showing the most recent completed day without filling the gap.", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
         item {
-            RecoveryHero(
-                score = snapshot.recovery,
-                headline = recommendation.headline,
-                recommendation = recommendation.action,
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onRecovery),
-            )
+            RecoveryHero(score = snapshot.recovery, headline = recommendation.headline, recommendation = recommendation.action, modifier = Modifier.fillMaxWidth().clickable(onClick = onRecovery))
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 Text("Today's signals", style = NoopType.editorialHeadline)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-                    MetricCard(
-                        label = "HRV",
-                        value = snapshot.hrvMs?.takeIf(Double::isFinite)?.roundToInt()?.toString() ?: "—",
-                        unit = "ms",
-                        delta = snapshot.hrvVsBaselinePct?.let { pct -> MetricDeltaModel("${abs(pct)}% vs base", if (pct >= 0) DeltaDirection.Positive else DeltaDirection.Negative, pct >= 0) },
-                        modifier = Modifier.weight(1f).clickable(onClick = onRecovery),
-                    )
-                    MetricCard(
-                        label = "Resting HR",
-                        value = snapshot.restingHrBpm?.toString() ?: "—",
-                        unit = "bpm",
-                        delta = snapshot.restingHrVsBaselineBpm?.let { bpm -> MetricDeltaModel("${abs(bpm)} vs base", if (bpm >= 0) DeltaDirection.Positive else DeltaDirection.Negative, bpm <= 0) },
-                        modifier = Modifier.weight(1f).clickable(onClick = onRecovery),
-                    )
+                    MetricCard(label = "HRV", value = snapshot.hrvMs?.takeIf(Double::isFinite)?.roundToInt()?.toString() ?: "—", unit = "ms", delta = snapshot.hrvVsBaselinePct?.let { pct -> MetricDeltaModel("${abs(pct)}% vs base", if (pct >= 0) DeltaDirection.Positive else DeltaDirection.Negative, pct >= 0) }, modifier = Modifier.weight(1f).clickable(onClick = onRecovery))
+                    MetricCard(label = "Resting HR", value = snapshot.restingHrBpm?.toString() ?: "—", unit = "bpm", delta = snapshot.restingHrVsBaselineBpm?.let { bpm -> MetricDeltaModel("${abs(bpm)} vs base", if (bpm >= 0) DeltaDirection.Positive else DeltaDirection.Negative, bpm <= 0) }, modifier = Modifier.weight(1f).clickable(onClick = onRecovery))
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                     MetricCard(label = "Sleep", value = formatSleep(snapshot.sleepMinutes), supportingText = snapshot.sleepEfficiencyPct?.let { "$it% efficiency" }, modifier = Modifier.weight(1f).clickable(onClick = onSleep))
@@ -91,12 +84,7 @@ fun TodayScreen(
             NoopSurface(level = NoopSurfaceLevel.Elevated, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.md)) {
                     Text("WHAT'S DRIVING TODAY", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    recommendation.reasons.forEachIndexed { index, reason ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-                            Text("0${index + 1}", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.primary)
-                            Text(reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        }
-                    }
+                    recommendation.reasons.forEachIndexed { index, reason -> Row(horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) { Text("0${index + 1}", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.primary); Text(reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f)) } }
                 }
             }
         }
@@ -109,11 +97,15 @@ fun TodayScreen(
                 }
             }
         }
-        if (!snapshot.dataComplete) item { NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) { Text("INCOMPLETE DATA", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("Some overnight signals are still missing. Available measurements are shown without filling gaps.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+        if (!snapshot.dataComplete) item {
+            NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+                    Text("INCOMPLETE DATA", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Some overnight signals are still missing. Available measurements are shown without filling gaps.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
-private fun formatSleep(minutes: Double?): String {
-    val total = minutes?.takeIf(Double::isFinite)?.roundToInt()?.coerceAtLeast(0) ?: return "—"
-    return "${total / 60}h ${total % 60}m"
-}
+private fun formatSleep(minutes: Double?): String { val total = minutes?.takeIf(Double::isFinite)?.roundToInt()?.coerceAtLeast(0) ?: return "—"; return "${total / 60}h ${total % 60}m" }
