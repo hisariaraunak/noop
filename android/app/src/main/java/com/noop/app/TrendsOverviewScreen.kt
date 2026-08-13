@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.noop.data.DailyMetric
 import com.noop.ui.AppViewModel
 import com.noop.ui.designsystem.NoopSpacing
 import com.noop.ui.designsystem.NoopSurface
@@ -31,6 +30,12 @@ internal fun TrendsOverviewScreen(
 ) {
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val recent = days.takeLast(14)
+
+    val recoveryValues = recent.mapNotNull { it.recovery?.takeIf(Double::isFinite)?.toFloat() }
+    val hrvValues = recent.mapNotNull { it.avgHrv?.takeIf(Double::isFinite)?.toFloat() }
+    val rhrValues = recent.mapNotNull { it.restingHr?.toFloat() }
+    val sleepValues = recent.mapNotNull { it.totalSleepMin?.takeIf(Double::isFinite)?.toFloat() }
+    val strainValues = recent.mapNotNull { it.strain?.takeIf(Double::isFinite)?.toFloat() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -57,9 +62,9 @@ internal fun TrendsOverviewScreen(
         item {
             TrendCard(
                 title = "Recovery",
-                value = recent.lastOrNull()?.recovery?.let { "${it.roundToInt()}%" } ?: "—",
-                values = recent.mapNotNull { it.recovery?.toFloat() },
-                insight = trendCopy(recent.mapNotNull { it.recovery }, higherIsBetter = true),
+                value = recent.lastOrNull()?.recovery?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}%" } ?: "—",
+                values = recoveryValues,
+                insight = trendCopy(recoveryValues.map { it.toDouble() }, higherIsBetter = true),
             )
         }
 
@@ -67,14 +72,14 @@ internal fun TrendsOverviewScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 CompactTrend(
                     title = "HRV",
-                    value = recent.lastOrNull()?.avgHrv?.let { "${it.roundToInt()} ms" } ?: "—",
-                    values = recent.mapNotNull { it.avgHrv?.toFloat() },
+                    value = recent.lastOrNull()?.avgHrv?.takeIf { it.isFinite() }?.let { "${it.roundToInt()} ms" } ?: "—",
+                    values = hrvValues,
                     modifier = Modifier.weight(1f),
                 )
                 CompactTrend(
                     title = "Resting HR",
                     value = recent.lastOrNull()?.restingHr?.let { "$it bpm" } ?: "—",
-                    values = recent.mapNotNull { it.restingHr?.toFloat() },
+                    values = rhrValues,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -84,14 +89,14 @@ internal fun TrendsOverviewScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
                 CompactTrend(
                     title = "Sleep",
-                    value = recent.lastOrNull()?.totalSleepMin?.let { formatMinutes(it) } ?: "—",
-                    values = recent.mapNotNull { it.totalSleepMin?.toFloat() },
+                    value = recent.lastOrNull()?.totalSleepMin?.takeIf { it.isFinite() }?.let { formatMinutes(it) } ?: "—",
+                    values = sleepValues,
                     modifier = Modifier.weight(1f),
                 )
                 CompactTrend(
                     title = "Strain",
-                    value = recent.lastOrNull()?.strain?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—",
-                    values = recent.mapNotNull { it.strain?.toFloat() },
+                    value = recent.lastOrNull()?.strain?.takeIf { it.isFinite() }?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—",
+                    values = strainValues,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -138,12 +143,14 @@ private fun CompactTrend(title: String, value: String, values: List<Float>, modi
 }
 
 private fun trendCopy(values: List<Double>, higherIsBetter: Boolean): String {
-    if (values.size < 4) return "More days are needed before calling a direction."
-    val midpoint = values.size / 2
-    val older = values.take(midpoint).average()
-    val newer = values.drop(midpoint).average()
-    if (older == 0.0) return "Your recent pattern is still forming."
+    val finite = values.filter { it.isFinite() }
+    if (finite.size < 4) return "More days are needed before calling a direction."
+    val midpoint = finite.size / 2
+    val older = finite.take(midpoint).average()
+    val newer = finite.drop(midpoint).average()
+    if (!older.isFinite() || !newer.isFinite() || older == 0.0) return "Your recent pattern is still forming."
     val pct = ((newer / older) - 1.0) * 100.0
+    if (!pct.isFinite()) return "Your recent pattern is still forming."
     if (kotlin.math.abs(pct) < 3.0) return "Broadly stable across the recent window."
     val favorable = if (higherIsBetter) pct > 0 else pct < 0
     val direction = if (pct > 0) "up" else "down"
@@ -151,6 +158,6 @@ private fun trendCopy(values: List<Double>, higherIsBetter: Boolean): String {
 }
 
 private fun formatMinutes(minutes: Double): String {
-    val total = minutes.roundToInt().coerceAtLeast(0)
+    val total = minutes.takeIf { it.isFinite() }?.roundToInt()?.coerceAtLeast(0) ?: return "—"
     return "${total / 60}h ${total % 60}m"
 }
