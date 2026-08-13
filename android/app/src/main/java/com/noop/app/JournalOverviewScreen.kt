@@ -37,9 +37,15 @@ internal fun JournalOverviewScreen(
     var entries by remember { mutableStateOf<List<JournalEntry>>(emptyList()) }
 
     LaunchedEffect(today) {
-        val imported = viewModel.repo.journal("my-whoop", today, today)
-        val native = viewModel.repo.journal("noop-journal", today, today)
-        entries = (imported + native).distinctBy { it.question }
+        // A transient Room/import failure should degrade the overview to an empty state rather than
+        // cancel the composition coroutine and crash the screen.
+        entries = try {
+            val imported = viewModel.repo.journal("my-whoop", today, today)
+            val native = viewModel.repo.journal("noop-journal", today, today)
+            (imported + native).distinctBy { it.question }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     val answered = entries.count { it.answeredYes || it.numericValue != null }
@@ -94,14 +100,14 @@ internal fun JournalOverviewScreen(
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-                ContextMetric("Recovery", latest?.recovery?.let { "${it.toInt()}%" } ?: "—", Modifier.weight(1f))
-                ContextMetric("Sleep", latest?.totalSleepMin?.let { formatMinutes(it) } ?: "—", Modifier.weight(1f))
+                ContextMetric("Recovery", latest?.recovery?.takeIf { it.isFinite() }?.let { "${it.toInt()}%" } ?: "—", Modifier.weight(1f))
+                ContextMetric("Sleep", latest?.totalSleepMin?.takeIf { it.isFinite() }?.let { formatMinutes(it) } ?: "—", Modifier.weight(1f))
             }
         }
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
-                ContextMetric("HRV", latest?.avgHrv?.let { "${it.toInt()} ms" } ?: "—", Modifier.weight(1f))
-                ContextMetric("Strain", latest?.strain?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—", Modifier.weight(1f))
+                ContextMetric("HRV", latest?.avgHrv?.takeIf { it.isFinite() }?.let { "${it.toInt()} ms" } ?: "—", Modifier.weight(1f))
+                ContextMetric("Strain", latest?.strain?.takeIf { it.isFinite() }?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—", Modifier.weight(1f))
             }
         }
 
@@ -132,6 +138,6 @@ private fun ContextMetric(label: String, value: String, modifier: Modifier = Mod
 }
 
 private fun formatMinutes(minutes: Double): String {
-    val total = minutes.toInt().coerceAtLeast(0)
+    val total = minutes.takeIf { it.isFinite() }?.toInt()?.coerceAtLeast(0) ?: return "—"
     return "${total / 60}h ${total % 60}m"
 }
