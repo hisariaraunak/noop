@@ -42,14 +42,14 @@ internal fun TrendsOverviewScreen(viewModel: AppViewModel) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(NoopSpacing.screenHorizontal, NoopSpacing.lg, NoopSpacing.screenHorizontal, NoopSpacing.xxxl),
-        verticalArrangement = Arrangement.spacedBy(NoopSpacing.lg),
+        contentPadding = PaddingValues(NoopSpacing.screenHorizontal, NoopSpacing.md, NoopSpacing.screenHorizontal, NoopSpacing.xxxl),
+        verticalArrangement = Arrangement.spacedBy(NoopSpacing.md),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+            Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
                 Text("TRENDS", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("See the direction, not the noise", style = NoopType.editorialHeadline)
-                Text("Compare recent movement against your own history and look for repeatable relationships.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Your patterns", style = NoopType.screenTitle)
+                Text("Movement across your own baseline.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
@@ -58,7 +58,16 @@ internal fun TrendsOverviewScreen(viewModel: AppViewModel) {
             }
         }
         if (recent.isEmpty()) {
-            item { RebuildStateCard("No trend data yet", "Sync several days of history to unlock trend views and correlations.") }
+            item { RebuildStateCard("No trend data yet", "Sync several days of history to start building your trend view.") }
+            item {
+                NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
+                        Text("WHAT WILL APPEAR HERE", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Recovery, HRV, resting HR, sleep and strain", style = NoopType.sectionTitle)
+                        Text("After 7 overlapping days, NOOP can also surface relationships between signals instead of leaving this screen empty.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         } else {
             item { TrendCard("Recovery", recoveryValues.lastOrNull()?.let { "${it.roundToInt()}%" } ?: "—", recoveryValues, trendCopy(recoveryValues.map(Float::toDouble), true)) }
             item {
@@ -73,12 +82,9 @@ internal fun TrendsOverviewScreen(viewModel: AppViewModel) {
                     CompactTrend("Strain", strainValues.lastOrNull()?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—", strainValues, Modifier.weight(1f))
                 }
             }
-            item { Text("Relationships", style = NoopType.editorialHeadline) }
-            if (insights.isEmpty()) {
-                item { RebuildStateCard("Patterns are still forming", "At least seven overlapping readings are required before NOOP surfaces a relationship.") }
-            } else {
-                items(insights.size) { i -> InsightCard(insights[i]) }
-            }
+            item { Text("Relationships", style = NoopType.sectionTitle) }
+            if (insights.isEmpty()) item { RebuildStateCard("Patterns are still forming", "At least seven overlapping readings are required before NOOP surfaces a relationship.") }
+            else items(insights.size) { i -> InsightCard(insights[i]) }
         }
     }
 }
@@ -89,7 +95,7 @@ private data class CorrelationInsight(val title: String, val body: String, val r
 private fun InsightCard(insight: CorrelationInsight) {
     NoopSurface(level = NoopSurfaceLevel.Standard, modifier = Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
-            Text(insight.title, style = MaterialTheme.typography.bodyLarge)
+            Text(insight.title, style = NoopType.sectionTitle)
             Text(insight.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("r=${String.format(java.util.Locale.US, "%.2f", insight.r)} · n=${insight.n}", style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -97,13 +103,7 @@ private fun InsightCard(insight: CorrelationInsight) {
 }
 
 private fun correlationInsights(days: List<DailyMetric>): List<CorrelationInsight> {
-    fun build(
-        title: String,
-        a: (DailyMetric) -> Double?,
-        b: (DailyMetric) -> Double?,
-        positiveCopy: String,
-        negativeCopy: String,
-    ): CorrelationInsight? {
+    fun build(title: String, a: (DailyMetric) -> Double?, b: (DailyMetric) -> Double?, positiveCopy: String, negativeCopy: String): CorrelationInsight? {
         val pairs = days.mapNotNull { d ->
             val x = a(d)?.takeIf(Double::isFinite)
             val y = b(d)?.takeIf(Double::isFinite)
@@ -111,16 +111,7 @@ private fun correlationInsights(days: List<DailyMetric>): List<CorrelationInsigh
         }
         return insightFromPairs(title, pairs, positiveCopy, negativeCopy)
     }
-
-    fun buildNextDay(
-        title: String,
-        today: (DailyMetric) -> Double?,
-        nextDay: (DailyMetric) -> Double?,
-        positiveCopy: String,
-        negativeCopy: String,
-    ): CorrelationInsight? {
-        // Pair row i's exposure with row i+1's outcome. Do not label a same-day correlation as
-        // next-day: that changes the interpretation of load/recovery substantially.
+    fun buildNextDay(title: String, today: (DailyMetric) -> Double?, nextDay: (DailyMetric) -> Double?, positiveCopy: String, negativeCopy: String): CorrelationInsight? {
         val pairs = days.zipWithNext().mapNotNull { (current, following) ->
             val x = today(current)?.takeIf(Double::isFinite)
             val y = nextDay(following)?.takeIf(Double::isFinite)
@@ -128,45 +119,15 @@ private fun correlationInsights(days: List<DailyMetric>): List<CorrelationInsigh
         }
         return insightFromPairs(title, pairs, positiveCopy, negativeCopy)
     }
-
     return listOfNotNull(
-        build(
-            "Sleep ↔ recovery",
-            { it.totalSleepMin },
-            { it.recovery },
-            "Longer sleep has tended to move with higher recovery.",
-            "Longer sleep has not translated into higher recovery in this window.",
-        ),
-        build(
-            "HRV ↔ recovery",
-            { it.avgHrv },
-            { it.recovery },
-            "Higher HRV has tended to move with higher recovery.",
-            "HRV and recovery have moved in opposite directions recently.",
-        ),
-        build(
-            "Resting HR ↔ recovery",
-            { it.restingHr?.toDouble() },
-            { it.recovery },
-            "Higher resting HR has moved with higher recovery in this sample.",
-            "Lower resting HR has tended to move with higher recovery.",
-        ),
-        buildNextDay(
-            "Strain ↔ next-day recovery",
-            { it.strain },
-            { it.recovery },
-            "Higher load has tended to precede higher next-day recovery in this sample.",
-            "Higher load has tended to precede lower next-day recovery.",
-        ),
+        build("Sleep ↔ recovery", { it.totalSleepMin }, { it.recovery }, "Longer sleep has tended to move with higher recovery.", "Longer sleep has not translated into higher recovery in this window."),
+        build("HRV ↔ recovery", { it.avgHrv }, { it.recovery }, "Higher HRV has tended to move with higher recovery.", "HRV and recovery have moved in opposite directions recently."),
+        build("Resting HR ↔ recovery", { it.restingHr?.toDouble() }, { it.recovery }, "Higher resting HR has moved with higher recovery in this sample.", "Lower resting HR has tended to move with higher recovery."),
+        buildNextDay("Strain ↔ next-day recovery", { it.strain }, { it.recovery }, "Higher load has tended to precede higher next-day recovery in this sample.", "Higher load has tended to precede lower next-day recovery."),
     ).sortedByDescending { kotlin.math.abs(it.r) }
 }
 
-private fun insightFromPairs(
-    title: String,
-    pairs: List<Pair<Double, Double>>,
-    positiveCopy: String,
-    negativeCopy: String,
-): CorrelationInsight? {
+private fun insightFromPairs(title: String, pairs: List<Pair<Double, Double>>, positiveCopy: String, negativeCopy: String): CorrelationInsight? {
     if (pairs.size < 7) return null
     val r = pearson(pairs) ?: return null
     if (kotlin.math.abs(r) < 0.2) return null
@@ -175,18 +136,9 @@ private fun insightFromPairs(
 
 private fun pearson(pairs: List<Pair<Double, Double>>): Double? {
     if (pairs.size < 2) return null
-    val mx = pairs.map { it.first }.average()
-    val my = pairs.map { it.second }.average()
-    var num = 0.0
-    var dx = 0.0
-    var dy = 0.0
-    for ((x, y) in pairs) {
-        val a = x - mx
-        val b = y - my
-        num += a * b
-        dx += a * a
-        dy += b * b
-    }
+    val mx = pairs.map { it.first }.average(); val my = pairs.map { it.second }.average()
+    var num = 0.0; var dx = 0.0; var dy = 0.0
+    for ((x, y) in pairs) { val a = x - mx; val b = y - my; num += a * b; dx += a * a; dy += b * b }
     val denom = sqrt(dx * dy)
     return if (denom > 0 && denom.isFinite()) (num / denom).takeIf(Double::isFinite) else null
 }
@@ -194,7 +146,7 @@ private fun pearson(pairs: List<Pair<Double, Double>>): Double? {
 @Composable
 private fun TrendCard(title: String, value: String, values: List<Float>, insight: String) {
     NoopSurface(level = NoopSurfaceLevel.Elevated, modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.sm)) {
+        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
             Text(title.uppercase(), style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = NoopType.dataHero)
             if (values.size >= 2) Sparkline(values)
@@ -206,7 +158,7 @@ private fun TrendCard(title: String, value: String, values: List<Float>, insight
 @Composable
 private fun CompactTrend(title: String, value: String, values: List<Float>, modifier: Modifier = Modifier) {
     NoopSurface(level = NoopSurfaceLevel.Standard, modifier = modifier) {
-        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xs)) {
+        Column(verticalArrangement = Arrangement.spacedBy(NoopSpacing.xxs)) {
             Text(title.uppercase(), style = NoopType.labelCaps, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = NoopType.dataDisplay)
             if (values.size >= 2) Sparkline(values)
@@ -218,8 +170,7 @@ private fun trendCopy(values: List<Double>, higherIsBetter: Boolean): String {
     val finite = values.filter(Double::isFinite)
     if (finite.size < 4) return "More days are needed before calling a direction."
     val midpoint = finite.size / 2
-    val older = finite.take(midpoint).average()
-    val newer = finite.drop(midpoint).average()
+    val older = finite.take(midpoint).average(); val newer = finite.drop(midpoint).average()
     if (!older.isFinite() || !newer.isFinite() || older == 0.0) return "Your recent pattern is still forming."
     val pct = ((newer / older) - 1.0) * 100.0
     if (!pct.isFinite() || kotlin.math.abs(pct) < 3.0) return "Broadly stable across the recent window."
