@@ -76,17 +76,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Build debug APK
+      - name: Build full and demo debug APKs
         working-directory: android
-        run: ./gradlew assembleFullDebug
+        run: ./gradlew assembleFullDebug assembleDemoDebug
 
       - name: Run unit tests
         working-directory: android
         run: ./gradlew testFullDebugUnitTest
 
-      - name: Upload debug APK
+      - name: Upload normal debug APK
         uses: actions/upload-artifact@v4
         with:
           name: noop-android-rebuild-debug
           path: android/app/build/outputs/apk/full/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload 30-day demo debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: noop-android-rebuild-demo-debug
+          path: android/app/build/outputs/apk/demo/debug/*.apk
           if-no-files-found: error
